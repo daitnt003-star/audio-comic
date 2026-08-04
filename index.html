@@ -27,7 +27,7 @@
   body{
     margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     background:var(--bg);color:var(--text);line-height:1.4;-webkit-text-size-adjust:100%;
-    overflow-wrap:anywhere;
+    overflow-wrap:anywhere;overflow-x:hidden;
   }
   header{
     position:sticky;top:0;z-index:20;
@@ -110,13 +110,13 @@
   #progress{height:5px;background:var(--panel2);border-radius:4px;margin:2px 0 10px;overflow:hidden}
   #progressBar{height:100%;width:0;background:var(--grad);transition:width .25s;border-radius:4px}
   /* settings panel */
-  #settings{display:none;background:var(--panel);border-top:1px solid var(--line);border-radius:0 0 var(--radius) var(--radius);padding:14px;margin-top:8px;box-shadow:0 8px 24px rgba(0,0,0,.2)}
+  #settings{display:none;background:var(--panel);border-top:1px solid var(--line);border-radius:0 0 var(--radius) var(--radius);padding:14px;margin-top:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);max-height:74vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
   #settings.open{display:block;animation:slideIn .18s ease}
   @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-  .field{display:flex;align-items:center;gap:10px;margin:11px 0}
+  .field{display:flex;align-items:center;gap:10px;margin:11px 0;min-width:0}
   .field label{width:96px;font-size:13px;font-weight:600;color:var(--muted);flex-shrink:0}
-  .field select,.field input[type=range]{flex:1}
-  .field select{padding:10px;border-radius:10px;background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  .field select,.field input[type=range]{flex:1;min-width:0}
+  .field select{padding:10px;border-radius:10px;background:var(--panel2);color:var(--text);border:1px solid var(--line);min-width:0;max-width:100%}
   .field .val{width:44px;text-align:right;font-size:13px;color:var(--accent);font-weight:700}
   input[type=range]{accent-color:var(--accent);height:24px}
   .seg{display:flex;gap:6px}
@@ -127,6 +127,13 @@
   a{color:var(--accent)}
   .toggle-adv{font-size:12px;color:var(--accent);cursor:pointer;user-select:none;font-weight:600}
   .chip-label{font-size:12.5px;color:var(--muted);flex-shrink:0;font-weight:600}
+  @media (max-width:400px){
+    .field label{width:78px;font-size:12px}
+    header{padding:10px 11px 11px}
+    main{padding:14px 11px 150px}
+    #reader{padding:20px 15px}
+    h1{font-size:15.5px}
+  }
 </style>
 </head>
 <body>
@@ -207,8 +214,12 @@
       </div>
     </div>
     <div class="hint">
-      Mẹo: nếu không thấy giọng tiếng Việt, hãy cài gói giọng tiếng Việt trong cài đặt hệ điều hành
-      (Android: Cài đặt → Ngôn ngữ → Text-to-speech; iOS: Cài đặt → Trợ năng → Nội dung nói).
+      <b>🎙️ Muốn giọng đọc hay hơn?</b> Giọng "mặc định" của máy thường nghe khô. Hãy tải thêm
+      <b>giọng tiếng Việt "Nâng cao"/"Cao cấp"</b> — tự nhiên hơn nhiều — rồi chọn ở ô Giọng đọc phía trên (có dấu ⭐):<br>
+      • <b>iPhone/iPad:</b> Cài đặt → Trợ năng → Nội dung nói → Giọng nói → Tiếng Việt → tải bản <b>Nâng cao</b>.<br>
+      • <b>Android:</b> Cài đặt → Quản lý chung → Văn bản thành giọng nói → cài <b>Google giọng nói</b> → tải dữ liệu Tiếng Việt.<br>
+      • <b>macOS:</b> Cài đặt hệ thống → Trợ năng → Nội dung nói → Giọng nói → Quản lý → Tiếng Việt → tải <b>Linh (Nâng cao)</b>.<br>
+      Sau khi tải xong, mở lại app là giọng mới hiện ra trong danh sách.
       <span class="toggle-adv" id="advToggle">· Nâng cao</span>
       <div id="adv" style="display:none;margin-top:8px">
         <div class="field"><label>Nội dung</label>
@@ -617,21 +628,24 @@ function loadVoices(){
   });
   const saved = store.get('voiceURI', null);
   el.voiceSel.innerHTML='';
-  // Tùy chọn giọng online chất lượng cao (đặt đầu tiên)
-  const og=document.createElement('option');
-  og.value=GOOGLE_VAL; og.textContent='🌐 Giọng Google Online — tự nhiên hơn (cần mạng)';
-  el.voiceSel.appendChild(og);
-  let viFound=false;
-  voices.forEach(v=>{
+  // chỉ hiển thị giọng tiếng Việt và tiếng Anh
+  const shown = voices.filter(v=>/^(vi|en)/i.test(v.lang));
+  shown.forEach(v=>{
     const o=document.createElement('option');
-    const vi=/vi/i.test(v.lang);
+    const vi=/^vi/i.test(v.lang);
     o.value=v.voiceURI;
-    o.textContent=`${v.name} (${v.lang})`+(vi?' 🇻🇳':'')+(voiceQuality(v)>=2?' ⭐':'');
-    if(vi) viFound=true;
+    o.textContent=`${v.name} (${v.lang})`+(vi?' 🇻🇳':' 🇬🇧')+(voiceQuality(v)>=2?' ⭐':'');
     el.voiceSel.appendChild(o);
   });
-  if(saved && (saved===GOOGLE_VAL || voices.some(v=>v.voiceURI===saved))) el.voiceSel.value=saved;
-  else { const vi=voices.find(v=>/vi/i.test(v.lang)); el.voiceSel.value = vi?vi.voiceURI:GOOGLE_VAL; }
+  if(!shown.length){
+    const o=document.createElement('option'); o.textContent='(chưa có giọng Việt/Anh — xem hướng dẫn bên dưới)'; el.voiceSel.appendChild(o);
+  }
+  if(saved && voices.some(v=>v.voiceURI===saved)) el.voiceSel.value=saved;
+  else {
+    // ưu tiên giọng Việt chất lượng cao nhất
+    const vi=voices.filter(v=>/vi/i.test(v.lang)).sort((a,b)=>voiceQuality(b)-voiceQuality(a))[0];
+    if(vi) el.voiceSel.value=vi.voiceURI;
+  }
 }
 if(synth){ loadVoices(); synth.onvoiceschanged = loadVoices; }
 else { loadVoices(); }   // vẫn có tùy chọn Google online nếu không có synth
@@ -693,7 +707,7 @@ function onlineFallback(i, text){
 }
 
 function startSpeak(fromIdx){
-  if(!synth && !isOnlineVoice()){ setStatus('Trình duyệt không hỗ trợ đọc audio. Hãy chọn "Giọng Google Online" trong ⚙️.', 'err'); return; }
+  if(!synth){ setStatus('Trình duyệt này không hỗ trợ đọc audio. Hãy thử Chrome/Safari mới nhất.', 'err'); return; }
   if(state.sentences.length===0){
     // chưa có chương: nếu có link thì tải rồi đọc
     const u=el.url.value.trim();
