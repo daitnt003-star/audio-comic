@@ -85,6 +85,8 @@
   #chapTitle::after{content:"";display:block;width:46px;height:3px;border-radius:3px;background:var(--grad);margin:12px 0 18px}
   #content .sent{cursor:pointer;border-radius:5px;transition:background .12s}
   #content .sent.active{background:var(--hi);color:var(--hi-text);box-shadow:0 0 0 4px var(--hi)}
+  #content mark.find{background:#f97316;color:#fff;border-radius:3px;padding:0 1px}
+  #content mark.find.cur{background:#ef4444;box-shadow:0 0 0 2px #ef4444}
   #content p{margin:0 0 1.05em;text-align:justify}
   .empty{color:var(--muted);text-align:center;padding:52px 16px}
   .empty .big{font-size:52px;margin-bottom:14px;opacity:.9}
@@ -120,6 +122,7 @@
   .seg{display:flex;gap:6px}
   .seg button{flex:1;padding:10px 6px;font-size:13px;background:var(--panel2)}
   .seg button.sel{background:var(--grad);color:#04202a;box-shadow:0 3px 10px rgba(34,211,238,.28)}
+  #speedSeg button{flex:1 1 52px}
   .hint{font-size:11.5px;color:var(--muted);margin-top:12px;line-height:1.55;padding-top:11px;border-top:1px dashed var(--line)}
   a{color:var(--accent)}
   .toggle-adv{font-size:12px;color:var(--accent);cursor:pointer;user-select:none;font-weight:600}
@@ -136,7 +139,13 @@
         <small>Dán link · nghe · tự sang chương</small>
       </div>
     </div>
+    <button class="icon" id="btnSearch" title="Tìm trong chương">🔍</button>
     <button class="icon" id="btnSettings" title="Cài đặt">⚙️</button>
+  </div>
+  <div class="row" id="searchBar" style="margin-top:10px;display:none">
+    <input type="text" id="findInput" placeholder="Tìm chữ trong chương…" autocomplete="off">
+    <span id="findCount" style="font-size:12px;color:var(--muted);flex-shrink:0;min-width:64px;text-align:right"></span>
+    <button class="icon" id="findClear" title="Xóa tìm kiếm">✕</button>
   </div>
   <div class="row" style="margin-top:11px">
     <input type="url" id="urlInput" placeholder="Dán link chương truyện vào đây…" autocomplete="off" inputmode="url">
@@ -163,9 +172,11 @@
       <input type="range" id="rate" min="0.5" max="3" step="0.1" value="1">
       <span class="val" id="rateVal">1.0x</span>
     </div>
-    <div class="seg" id="speedSeg" style="margin:-2px 0 4px">
+    <div class="seg" id="speedSeg" style="margin:-2px 0 4px;flex-wrap:wrap">
       <button data-s="1">1x</button>
+      <button data-s="1.25">1.25x</button>
       <button data-s="1.5">1.5x</button>
+      <button data-s="1.75">1.75x</button>
       <button data-s="2">2x</button>
       <button data-s="2.5">2.5x</button>
       <button data-s="3">3x</button>
@@ -256,6 +267,7 @@ const el = {
   selContent:$('selContent'), proxySel:$('proxySel'), advToggle:$('advToggle'), adv:$('adv'),
   btnManual:$('btnManual'),
   chapNum:$('chapNum'), chapPlus:$('chapPlus'), chapMinus:$('chapMinus'), chapGo:$('chapGo'),
+  btnSearch:$('btnSearch'), searchBar:$('searchBar'), findInput:$('findInput'), findCount:$('findCount'), findClear:$('findClear'),
 };
 
 // ---------- Persisted settings ----------
@@ -551,6 +563,8 @@ function renderChapter(title, paras){
   el.title.textContent = title;
   el.content.innerHTML='';
   state.sentences=[]; state.idx=0;
+  if(el.findInput){ el.findInput.value=''; el.findCount.textContent=''; }
+  findMarks=[]; findCur=-1;
   for(const para of paras){
     const p = document.createElement('p');
     const sents = splitSentences(para);
@@ -574,34 +588,61 @@ const synth = window.speechSynthesis;
 let voices = [];
 let curUtter = null;
 let resumeTimer = null;
+let currentEngine = 'device';
+let forceDevice = false;         // bật khi giọng online lỗi → tạm dùng thiết bị
+let onlineWarned = false;
+const GOOGLE_VAL = '__google__';
 
+// thẻ audio dùng chung cho giọng online
+const audioEl = new Audio();
+audioEl.preload = 'auto';
+
+// điểm chất lượng giọng: ưu tiên Google/Neural/Enhanced/Premium
+function voiceQuality(v){
+  const s=(v.name+' '+(v.voiceURI||'')).toLowerCase();
+  let q=0;
+  if(/neural|natural|premium|enhanced|wavenet/.test(s)) q+=3;
+  if(/google/.test(s)) q+=2;
+  if(v.localService===false) q+=1;      // giọng online của hệ thống thường hay hơn
+  if(/compact|eloquence|espeak/.test(s)) q-=3;
+  return q;
+}
 function loadVoices(){
-  voices = synth.getVoices();
-  // sắp xếp: tiếng Việt lên đầu
+  voices = synth ? synth.getVoices() : [];
   voices.sort((a,b)=>{
     const av=/vi/i.test(a.lang)?0:1, bv=/vi/i.test(b.lang)?0:1;
-    return av-bv || a.name.localeCompare(b.name);
+    if(av!==bv) return av-bv;                     // tiếng Việt lên đầu
+    const qd=voiceQuality(b)-voiceQuality(a);     // chất lượng cao lên trước
+    return qd || a.name.localeCompare(b.name);
   });
   const saved = store.get('voiceURI', null);
   el.voiceSel.innerHTML='';
+  // Tùy chọn giọng online chất lượng cao (đặt đầu tiên)
+  const og=document.createElement('option');
+  og.value=GOOGLE_VAL; og.textContent='🌐 Giọng Google Online — tự nhiên hơn (cần mạng)';
+  el.voiceSel.appendChild(og);
   let viFound=false;
   voices.forEach(v=>{
     const o=document.createElement('option');
-    o.value=v.voiceURI; o.textContent=`${v.name} (${v.lang})`+(/vi/i.test(v.lang)?' 🇻🇳':'');
-    if(/vi/i.test(v.lang)) viFound=true;
+    const vi=/vi/i.test(v.lang);
+    o.value=v.voiceURI;
+    o.textContent=`${v.name} (${v.lang})`+(vi?' 🇻🇳':'')+(voiceQuality(v)>=2?' ⭐':'');
+    if(vi) viFound=true;
     el.voiceSel.appendChild(o);
   });
-  if(saved && voices.some(v=>v.voiceURI===saved)) el.voiceSel.value=saved;
-  else { const vi=voices.find(v=>/vi/i.test(v.lang)); if(vi) el.voiceSel.value=vi.voiceURI; }
-  if(!viFound && voices.length){
-    setStatus('⚠️ Chưa thấy giọng tiếng Việt trên máy. Vẫn đọc được bằng giọng khác, nhưng nên cài gói giọng tiếng Việt trong Cài đặt hệ thống.', '');
-  }
+  if(saved && (saved===GOOGLE_VAL || voices.some(v=>v.voiceURI===saved))) el.voiceSel.value=saved;
+  else { const vi=voices.find(v=>/vi/i.test(v.lang)); el.voiceSel.value = vi?vi.voiceURI:GOOGLE_VAL; }
 }
 if(synth){ loadVoices(); synth.onvoiceschanged = loadVoices; }
+else { loadVoices(); }   // vẫn có tùy chọn Google online nếu không có synth
 
 function getVoice(){
   const uri = el.voiceSel.value;
   return voices.find(v=>v.voiceURI===uri) || voices.find(v=>/vi/i.test(v.lang)) || voices[0] || null;
+}
+function isOnlineVoice(){ return el.voiceSel.value===GOOGLE_VAL && !forceDevice; }
+function googleTTS(text){
+  return 'https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q='+encodeURIComponent(text.slice(0,200));
 }
 
 function speakSentence(i){
@@ -609,28 +650,50 @@ function speakSentence(i){
   state.idx=i;
   highlight(i);
   const s = state.sentences[i];
-  const u = new SpeechSynthesisUtterance(s.text);
+  if(isOnlineVoice()) speakOnline(i, s.text);
+  else speakDevice(i, s.text);
+  updateProgress();
+}
+
+function speakDevice(i, text){
+  currentEngine='device';
+  const u = new SpeechSynthesisUtterance(text);
   const v = getVoice();
   if(v){ u.voice=v; u.lang=v.lang; } else u.lang='vi-VN';
   u.rate = parseFloat(el.rate.value)||1;
   u.pitch = parseFloat(el.pitch.value)||1;
-  u.onend = ()=>{
-    if(!state.reading) return;
-    if(u.__stopped) return;
-    speakSentence(i+1);
-  };
+  u.onend = ()=>{ if(state.reading && !u.__stopped) speakSentence(i+1); };
   u.onerror = (ev)=>{
     if(ev.error==='interrupted'||ev.error==='canceled') return;
-    // bỏ qua câu lỗi, đọc tiếp
     if(state.reading) setTimeout(()=>speakSentence(i+1), 50);
   };
   curUtter=u;
+  try{ synth.cancel(); }catch(e){}
   synth.speak(u);
-  updateProgress();
+}
+
+function speakOnline(i, text){
+  currentEngine='online';
+  try{
+    audioEl.onended=null; audioEl.onerror=null;
+    audioEl.__i=i;
+    audioEl.src=googleTTS(text);
+    audioEl.playbackRate=Math.min(Math.max(parseFloat(el.rate.value)||1,0.5),4);
+    audioEl.onended=()=>{ if(state.reading && audioEl.__i===i) speakSentence(i+1); };
+    audioEl.onerror=()=>onlineFallback(i,text);
+    const p=audioEl.play();
+    if(p && p.catch) p.catch(()=>onlineFallback(i,text));
+  }catch(e){ onlineFallback(i,text); }
+}
+function onlineFallback(i, text){
+  if(!state.reading) return;
+  forceDevice=true;   // tránh lỗi lặp lại — dùng giọng thiết bị cho phần còn lại
+  if(!onlineWarned){ onlineWarned=true; setStatus('Giọng Google không tải được (mạng chặn) — tạm chuyển sang giọng thiết bị. Đổi lại trong ⚙️ nếu muốn thử lại.', 'err'); }
+  if(synth) speakDevice(i, text);
 }
 
 function startSpeak(fromIdx){
-  if(!synth){ setStatus('Trình duyệt không hỗ trợ đọc audio.', 'err'); return; }
+  if(!synth && !isOnlineVoice()){ setStatus('Trình duyệt không hỗ trợ đọc audio. Hãy chọn "Giọng Google Online" trong ⚙️.', 'err'); return; }
   if(state.sentences.length===0){
     // chưa có chương: nếu có link thì tải rồi đọc
     const u=el.url.value.trim();
@@ -638,7 +701,8 @@ function startSpeak(fromIdx){
     else setStatus('Chưa có nội dung để đọc. Hãy tải một chương trước.', 'err');
     return;
   }
-  synth.cancel();
+  try{ if(synth) synth.cancel(); }catch(e){}
+  try{ audioEl.pause(); }catch(e){}
   state.reading=true; state.paused=false;
   el.play.textContent='⏸';
   if(typeof fromIdx!=='number') fromIdx = state.idx||0;
@@ -651,14 +715,16 @@ function pauseSpeak(){
   if(!state.reading) return;
   state.paused=true; state.reading=false;
   el.play.textContent='▶';
-  try{ synth.pause(); }catch(e){}
+  if(currentEngine==='online'){ try{ audioEl.pause(); }catch(e){} }
+  else { try{ synth.pause(); }catch(e){} }
   el.now.textContent='Tạm dừng';
 }
 
 function stopSpeak(){
   state.reading=false; state.paused=false;
   if(curUtter) curUtter.__stopped=true;
-  try{ synth.cancel(); }catch(e){}
+  try{ if(synth) synth.cancel(); }catch(e){}
+  try{ audioEl.onended=null; audioEl.pause(); audioEl.currentTime=0; }catch(e){}
   el.play.textContent='▶';
   stopResumeGuard();
   keepAwake(false);
@@ -672,10 +738,14 @@ function togglePlay(){
   else if(state.paused){
     // resume
     state.reading=true; state.paused=false; el.play.textContent='⏸';
-    keepAwake(true); startResumeGuard();
-    try{ synth.resume(); }catch(e){}
-    // một số trình duyệt resume không chạy → đọc lại từ câu hiện tại
-    setTimeout(()=>{ if(state.reading && !synth.speaking) speakSentence(state.idx); }, 250);
+    keepAwake(true);
+    if(currentEngine==='online'){
+      const p=audioEl.play(); if(p&&p.catch) p.catch(()=>speakSentence(state.idx));
+    } else {
+      startResumeGuard();
+      try{ synth.resume(); }catch(e){}
+      setTimeout(()=>{ if(state.reading && !synth.speaking) speakSentence(state.idx); }, 250);
+    }
   }
   else { startSpeak(state.idx||0); }
 }
@@ -754,17 +824,35 @@ el.advToggle.addEventListener('click',()=>{ el.adv.style.display = el.adv.style.
 
 // đọc lại câu hiện tại ngay khi đổi giọng/tốc độ giữa chừng
 function restartCurrentIfReading(){
-  if(state.reading){ try{ if(curUtter) curUtter.__stopped=true; synth.cancel(); }catch(e){} setTimeout(()=>speakSentence(state.idx),60); }
+  if(state.reading){
+    try{ if(curUtter) curUtter.__stopped=true; if(synth) synth.cancel(); }catch(e){}
+    try{ audioEl.onended=null; audioEl.pause(); }catch(e){}
+    setTimeout(()=>speakSentence(state.idx),60);
+  } else if(currentEngine==='online'){
+    try{ audioEl.playbackRate=Math.min(Math.max(parseFloat(el.rate.value)||1,0.5),4); }catch(e){}
+  }
 }
 function syncSpeedSeg(){
   const v = parseFloat(el.rate.value).toString();
   el.speedSeg.querySelectorAll('button').forEach(b=> b.classList.toggle('sel', b.dataset.s===v));
 }
-el.voiceSel.addEventListener('change',()=>{ store.set('voiceURI', el.voiceSel.value); restartCurrentIfReading(); });
+el.voiceSel.addEventListener('change',()=>{
+  store.set('voiceURI', el.voiceSel.value);
+  forceDevice=false; onlineWarned=false;   // đổi giọng → cho phép thử lại giọng online
+  restartCurrentIfReading();
+});
 el.voiceTest.addEventListener('click',()=>{
+  const sample='Đây là giọng đọc thử. Xin chào, chúc bạn đọc truyện vui vẻ.';
+  try{ if(synth) synth.cancel(); }catch(e){}
+  try{ audioEl.pause(); }catch(e){}
+  if(el.voiceSel.value===GOOGLE_VAL){
+    const a=audioEl; a.onended=null; a.onerror=()=>setStatus('Giọng Google không phát được ở đây (mạng chặn).', 'err');
+    a.src=googleTTS(sample); a.playbackRate=Math.min(Math.max(parseFloat(el.rate.value)||1,0.5),4);
+    const p=a.play(); if(p&&p.catch) p.catch(()=>setStatus('Không phát được giọng Google.', 'err'));
+    return;
+  }
   if(!synth) return;
-  synth.cancel();
-  const u=new SpeechSynthesisUtterance('Đây là giọng đọc thử. Xin chào, chúc bạn đọc truyện vui vẻ.');
+  const u=new SpeechSynthesisUtterance(sample);
   const v=getVoice(); if(v){ u.voice=v; u.lang=v.lang; } else u.lang='vi-VN';
   u.rate=parseFloat(el.rate.value)||1; u.pitch=parseFloat(el.pitch.value)||1;
   synth.speak(u);
@@ -800,6 +888,57 @@ el.chapMinus.addEventListener('click',()=>{
   if(cur<=1){ setStatus('Đang ở chương đầu.', ''); return; }
   el.chapNum.value = cur-1; jumpToChapter(el.chapNum.value);
 });
+
+// ---------- Tìm kiếm trong chương ----------
+let findMarks = [];
+let findCur = -1;
+function clearFind(){
+  el.content.querySelectorAll('mark.find').forEach(m=>{ m.replaceWith(document.createTextNode(m.textContent)); });
+  el.content.querySelectorAll('.sent').forEach(s=>s.normalize());
+  findMarks=[]; findCur=-1; el.findCount.textContent='';
+}
+function runFind(q){
+  clearFind();
+  q=(q||'').trim();
+  if(!q) return;
+  const rx=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+  el.content.querySelectorAll('.sent').forEach(span=>{
+    const walker=document.createTreeWalker(span, NodeFilter.SHOW_TEXT, null);
+    const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node=>{
+      const text=node.nodeValue; rx.lastIndex=0;
+      if(!rx.test(text)) return; rx.lastIndex=0;
+      const frag=document.createDocumentFragment(); let last=0,m;
+      while((m=rx.exec(text))){
+        if(m.index>last) frag.appendChild(document.createTextNode(text.slice(last,m.index)));
+        const mk=document.createElement('mark'); mk.className='find'; mk.textContent=m[0];
+        frag.appendChild(mk); findMarks.push(mk); last=m.index+m[0].length;
+        if(m.index===rx.lastIndex) rx.lastIndex++;
+      }
+      if(last<text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      node.replaceWith(frag);
+    });
+  });
+  if(findMarks.length){ el.findCount.textContent='1/'+findMarks.length; gotoFind(0); }
+  else el.findCount.textContent='Không thấy';
+}
+function gotoFind(i){
+  if(!findMarks.length) return;
+  if(findCur>=0 && findMarks[findCur]) findMarks[findCur].classList.remove('cur');
+  findCur=(i+findMarks.length)%findMarks.length;
+  const m=findMarks[findCur]; m.classList.add('cur');
+  m.scrollIntoView({block:'center',behavior:'smooth'});
+  el.findCount.textContent=(findCur+1)+'/'+findMarks.length;
+}
+el.btnSearch.addEventListener('click',()=>{
+  const open = el.searchBar.style.display!=='none';
+  if(open){ el.searchBar.style.display='none'; clearFind(); }
+  else { el.searchBar.style.display='flex'; el.findInput.focus(); }
+});
+let findTimer=null;
+el.findInput.addEventListener('input',()=>{ clearTimeout(findTimer); findTimer=setTimeout(()=>runFind(el.findInput.value),200); });
+el.findInput.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); if(findMarks.length) gotoFind(findCur+1); else runFind(el.findInput.value); } });
+el.findClear.addEventListener('click',()=>{ el.findInput.value=''; clearFind(); el.findInput.focus(); });
 el.fontSize.addEventListener('input',()=>{
   document.documentElement.style.setProperty('--fz', el.fontSize.value+'px');
   el.fontVal.textContent=el.fontSize.value; store.set('font', el.fontSize.value);
