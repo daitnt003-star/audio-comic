@@ -153,25 +153,25 @@
     <button class="icon" id="btnSettings" title="Cài đặt">⚙️</button>
     <input type="file" id="pdfInput" accept="application/pdf,.pdf" style="display:none">
   </div>
-  <div class="row" id="searchBar" style="margin-top:10px;display:none">
+  <form class="row" id="searchBar" style="margin-top:10px;display:none" onsubmit="return false" action="javascript:void(0)">
     <input type="text" id="findInput" placeholder="Tìm chữ trong chương…" autocomplete="off" enterkeyhint="search" inputmode="search">
     <span id="findCount" style="font-size:12px;color:var(--muted);flex-shrink:0;min-width:46px;text-align:right"></span>
-    <button class="icon" id="findPrev" title="Kết quả trước" style="padding:12px 11px">↑</button>
-    <button class="icon" id="findNext" title="Kết quả sau" style="padding:12px 11px">↓</button>
-    <button class="icon" id="findClear" title="Xóa tìm kiếm" style="padding:12px 11px">✕</button>
-  </div>
-  <div class="row" id="urlBar" style="margin-top:11px">
+    <button type="button" class="icon" id="findPrev" title="Kết quả trước" style="padding:12px 11px">↑</button>
+    <button type="button" class="icon" id="findNext" title="Kết quả sau" style="padding:12px 11px">↓</button>
+    <button type="button" class="icon" id="findClear" title="Xóa tìm kiếm" style="padding:12px 11px">✕</button>
+  </form>
+  <form class="row" id="urlBar" style="margin-top:11px" onsubmit="return false" action="javascript:void(0)">
     <input type="url" id="urlInput" placeholder="Dán link chương truyện vào đây…" autocomplete="off" inputmode="url">
-    <button class="primary" id="btnLoad">Tải</button>
-  </div>
-  <div class="row" id="chapJumpBar" style="margin-top:8px">
+    <button type="button" class="primary" id="btnLoad">Tải</button>
+  </form>
+  <form class="row" id="chapJumpBar" style="margin-top:8px" onsubmit="return false" action="javascript:void(0)">
     <span class="chip-label">Chương</span>
-    <button class="icon" id="chapMinus" title="Chương trước">−</button>
+    <button type="button" class="icon" id="chapMinus" title="Chương trước">−</button>
     <input type="number" id="chapNum" inputmode="numeric" min="1" placeholder="?"
       style="width:70px;flex:0 0 auto;text-align:center;padding:10px">
-    <button class="icon" id="chapPlus" title="Chương sau">+</button>
-    <button id="chapGo" style="flex:1">Đi tới chương</button>
-  </div>
+    <button type="button" class="icon" id="chapPlus" title="Chương sau">+</button>
+    <button type="button" id="chapGo" style="flex:1">Đi tới chương</button>
+  </form>
   <div class="row" id="pdfBanner" style="margin-top:11px;display:none">
     <span style="flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📄 <span id="pdfName"></span></span>
     <button id="pdfExit" style="flex:0 0 auto">✕ Thoát PDF</button>
@@ -275,7 +275,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '2.0';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '2.1';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -336,6 +336,9 @@ function setMode(mode){
 }
 
 el.url.value = state.url;
+
+// Chặn MỌI submit form (kể cả submit ngầm của iOS khi nhấn Enter/Search) → không bao giờ reload
+document.addEventListener('submit', function(e){ e.preventDefault(); e.stopPropagation(); return false; }, true);
 
 // ============================================================
 //  FETCH
