@@ -275,7 +275,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '1.9';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '2.0';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -331,7 +331,8 @@ function setMode(mode){
   const pdf = mode==='pdf';
   el.urlBar.style.display = pdf?'none':'flex';
   el.chapJumpBar.style.display = pdf?'none':'flex';
-  el.pdfBanner.style.display = pdf?'flex':'none';
+  const searchOpen = el.searchBar && el.searchBar.style.display!=='none';
+  el.pdfBanner.style.display = (pdf && !searchOpen)?'flex':'none';
 }
 
 el.url.value = state.url;
@@ -978,10 +979,17 @@ function gotoFind(i){
   m.scrollIntoView({block:'center',behavior:'smooth'});
   el.findCount.textContent=(findCur+1)+'/'+findMarks.length;
 }
+function openSearch(){
+  el.searchBar.style.display='flex';
+  if(state.mode==='pdf') el.pdfBanner.style.display='none';  // tránh chạm nhầm nút Thoát PDF khi tìm
+  el.findInput.focus();
+}
+function closeSearch(){
+  el.searchBar.style.display='none'; clearFind(); el.findInput.value='';
+  if(state.mode==='pdf') el.pdfBanner.style.display='flex';
+}
 el.btnSearch.addEventListener('click',()=>{
-  const open = el.searchBar.style.display!=='none';
-  if(open){ el.searchBar.style.display='none'; clearFind(); el.findInput.value=''; }
-  else { el.searchBar.style.display='flex'; el.findInput.focus(); }
+  if(el.searchBar.style.display!=='none') closeSearch(); else openSearch();
 });
 let findTimer=null, findComposing=false;
 el.findInput.addEventListener('compositionstart',()=>{ findComposing=true; });
