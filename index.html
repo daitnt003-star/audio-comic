@@ -44,7 +44,9 @@
   }
   h1{font-size:16.5px;margin:0;font-weight:800;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .brand small{display:block;font-size:11px;font-weight:500;color:var(--muted);margin-top:1px}
-  input,select,button,textarea{font-family:inherit;font-size:15px}
+  input,select,button,textarea{font-family:inherit;font-size:16px}
+  /* 16px để iOS không tự phóng to (auto-zoom) khi focus vào ô nhập */
+  input[type=url],input[type=text],input[type=number]{font-size:16px}
   input[type=url],input[type=text]{
     flex:1;min-width:0;padding:12px 13px;border-radius:12px;border:1px solid var(--line);
     background:var(--panel2);color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s;
@@ -152,7 +154,7 @@
     <input type="file" id="pdfInput" accept="application/pdf,.pdf" style="display:none">
   </div>
   <div class="row" id="searchBar" style="margin-top:10px;display:none">
-    <input type="text" id="findInput" placeholder="Tìm chữ trong chương…" autocomplete="off">
+    <input type="text" id="findInput" placeholder="Tìm chữ trong chương…" autocomplete="off" enterkeyhint="search" inputmode="search">
     <span id="findCount" style="font-size:12px;color:var(--muted);flex-shrink:0;min-width:64px;text-align:right"></span>
     <button class="icon" id="findClear" title="Xóa tìm kiếm">✕</button>
   </div>
@@ -844,7 +846,7 @@ document.addEventListener('visibilitychange',()=>{
 function setStatus(msg, type){ el.status.textContent=msg; el.status.className='status'+(type?' '+type:''); }
 
 el.load.addEventListener('click',()=> loadChapter(el.url.value));
-el.url.addEventListener('keydown',e=>{ if(e.key==='Enter') loadChapter(el.url.value); });
+el.url.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); loadChapter(el.url.value); } });
 el.play.addEventListener('click', togglePlay);
 el.stop.addEventListener('click', stopSpeak);
 el.next.addEventListener('click',()=>{ if(state.nextUrl) loadChapter(state.nextUrl,{autoplay:state.reading||state.paused}); else setStatus('Không tìm thấy link chương sau.', 'err'); });
@@ -909,7 +911,7 @@ function jumpToChapter(n){
   loadChapter(target, {autoplay:state.reading||state.paused});
 }
 el.chapGo.addEventListener('click',()=> jumpToChapter(el.chapNum.value));
-el.chapNum.addEventListener('keydown',e=>{ if(e.key==='Enter') jumpToChapter(el.chapNum.value); });
+el.chapNum.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); jumpToChapter(el.chapNum.value); } });
 el.chapPlus.addEventListener('click',()=>{
   const cur = parseInt(el.chapNum.value,10) || currentChapterNum(baseUrlForJump()) || 0;
   el.chapNum.value = cur+1; jumpToChapter(el.chapNum.value);
@@ -986,7 +988,11 @@ el.findInput.addEventListener('input',()=>{
   findTimer=setTimeout(()=>runFind(el.findInput.value,false),350);  // không cuộn khi gõ
 });
 el.findInput.addEventListener('keydown',e=>{
-  if(e.key==='Enter'){ e.preventDefault(); if(findMarks.length) gotoFind(findCur+1); else runFind(el.findInput.value,true); }
+  if(e.key==='Enter' || e.keyCode===13){
+    e.preventDefault(); e.stopPropagation();          // chặn mọi hành vi submit/tải lại
+    if(findMarks.length) gotoFind(findCur+1); else runFind(el.findInput.value,true);
+    return false;
+  }
 });
 el.findClear.addEventListener('click',()=>{ el.findInput.value=''; clearFind(); el.findInput.focus(); });
 
@@ -1102,6 +1108,8 @@ el.btnManual.addEventListener('click',()=>{
   el.autonextSeg.querySelectorAll('button').forEach(b=>b.classList.toggle('sel', b.dataset.auto===an));
   syncSpeedSeg();
   setMode('web');
+  // phòng xa: mọi <button> đều là type=button để không bao giờ submit/tải lại trang
+  document.querySelectorAll('button:not([type])').forEach(b=>{ b.type='button'; });
   const cn=currentChapterNum(state.url); if(cn!=null) el.chapNum.value=cn;
 })();
 
