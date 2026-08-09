@@ -145,7 +145,7 @@
       <div class="logo">🎧</div>
       <div style="min-width:0">
         <h1>Đọc Truyện Audio</h1>
-        <small>Dán link · nghe · tự sang chương</small>
+        <small>Nghe · tự sang chương · <span id="verTag"></span></small>
       </div>
     </div>
     <button class="icon" id="btnPdf" title="Mở file PDF">📄</button>
@@ -155,8 +155,10 @@
   </div>
   <div class="row" id="searchBar" style="margin-top:10px;display:none">
     <input type="text" id="findInput" placeholder="Tìm chữ trong chương…" autocomplete="off" enterkeyhint="search" inputmode="search">
-    <span id="findCount" style="font-size:12px;color:var(--muted);flex-shrink:0;min-width:64px;text-align:right"></span>
-    <button class="icon" id="findClear" title="Xóa tìm kiếm">✕</button>
+    <span id="findCount" style="font-size:12px;color:var(--muted);flex-shrink:0;min-width:46px;text-align:right"></span>
+    <button class="icon" id="findPrev" title="Kết quả trước" style="padding:12px 11px">↑</button>
+    <button class="icon" id="findNext" title="Kết quả sau" style="padding:12px 11px">↓</button>
+    <button class="icon" id="findClear" title="Xóa tìm kiếm" style="padding:12px 11px">✕</button>
   </div>
   <div class="row" id="urlBar" style="margin-top:11px">
     <input type="url" id="urlInput" placeholder="Dán link chương truyện vào đây…" autocomplete="off" inputmode="url">
@@ -273,6 +275,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
+const APP_VERSION = '1.9';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -287,6 +290,7 @@ const el = {
   btnManual:$('btnManual'),
   chapNum:$('chapNum'), chapPlus:$('chapPlus'), chapMinus:$('chapMinus'), chapGo:$('chapGo'),
   btnSearch:$('btnSearch'), searchBar:$('searchBar'), findInput:$('findInput'), findCount:$('findCount'), findClear:$('findClear'),
+  findPrev:$('findPrev'), findNext:$('findNext'), verTag:$('verTag'),
   btnPdf:$('btnPdf'), pdfInput:$('pdfInput'),
   urlBar:$('urlBar'), chapJumpBar:$('chapJumpBar'), pdfBanner:$('pdfBanner'), pdfName:$('pdfName'), pdfExit:$('pdfExit'),
 };
@@ -994,6 +998,8 @@ el.findInput.addEventListener('keydown',e=>{
     return false;
   }
 });
+el.findPrev.addEventListener('click',()=>{ if(findMarks.length) gotoFind(findCur-1); else runFind(el.findInput.value,true); });
+el.findNext.addEventListener('click',()=>{ if(findMarks.length) gotoFind(findCur+1); else runFind(el.findInput.value,true); });
 el.findClear.addEventListener('click',()=>{ el.findInput.value=''; clearFind(); el.findInput.focus(); });
 
 // ---------- Mở & đọc file PDF ----------
@@ -1108,6 +1114,8 @@ el.btnManual.addEventListener('click',()=>{
   el.autonextSeg.querySelectorAll('button').forEach(b=>b.classList.toggle('sel', b.dataset.auto===an));
   syncSpeedSeg();
   setMode('web');
+  if(el.verTag) el.verTag.textContent='v'+APP_VERSION;
+  document.title='Đọc Truyện Audio v'+APP_VERSION;
   // phòng xa: mọi <button> đều là type=button để không bao giờ submit/tải lại trang
   document.querySelectorAll('button:not([type])').forEach(b=>{ b.type='button'; });
   const cn=currentChapterNum(state.url); if(cn!=null) el.chapNum.value=cn;
