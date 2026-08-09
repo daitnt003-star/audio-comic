@@ -89,7 +89,7 @@
   #content .sent.active{background:var(--hi);color:var(--hi-text)}
   #content .sent.found{background:rgba(249,115,22,.35)}
   #content .sent.foundcur{background:#ef4444;color:#fff}
-  #content p{margin:0 0 1.05em;text-align:justify}
+  #content p{margin:0 0 1.05em}
   .empty{color:var(--muted);text-align:center;padding:52px 16px}
   .empty .big{font-size:52px;margin-bottom:14px;opacity:.9}
   .empty b{color:var(--text)}
@@ -306,7 +306,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '2.4';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '2.6';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -602,7 +602,7 @@ async function loadChapter(url, {autoplay=false}={}){
     el.next.style.opacity = nav.nextUrl?1:.4;
     el.prev.style.opacity = nav.prevUrl?1:.4;
     if(autoplay) startSpeak(0);
-    window.scrollTo({top:0,behavior:'smooth'});
+    window.scrollTo({top:0,behavior:'auto'});
     return true;
   }catch(e){
     setStatus('Lỗi tải chương: '+ (e && e.message||e) +'. Thử proxy khác trong ⚙️ Nâng cao, hoặc dán nội dung thủ công.', 'err');
@@ -636,18 +636,20 @@ function renderChapter(title, paras){
   if(el.findInput){ el.findInput.value=''; el.findCount.textContent=''; }
   findMarks=[]; findCur=-1;
   const frag = document.createDocumentFragment();
+  const MAX_PER_P = 4;   // chia đoạn nhỏ → iOS bố trí nhẹ, tránh 1 khối văn khổng lồ
   for(const para of paras){
-    const p = document.createElement('p');
     const sents = splitSentences(para);
+    let p=null, count=0;
     for(const s of sents){
+      if(!p || count>=MAX_PER_P){ p=document.createElement('p'); frag.appendChild(p); count=0; }
       const span = document.createElement('span');
       span.className='sent';
       span.dataset.i = state.sentences.length;   // dùng event-delegation thay vì listener từng câu
       span.textContent = s+' ';
       p.appendChild(span);
       state.sentences.push({text:s, node:span});
+      count++;
     }
-    frag.appendChild(p);
   }
   el.content.appendChild(frag);   // gắn 1 lần → nhẹ bộ nhớ hơn nhiều với nội dung dài
 }
@@ -862,7 +864,7 @@ function highlight(i){
   s.node.classList.add('active');
   const r=s.node.getBoundingClientRect();
   if(r.top<80 || r.bottom>window.innerHeight-140){
-    s.node.scrollIntoView({block:'center',behavior:'smooth'});
+    s.node.scrollIntoView({block:'center',behavior:'auto'});
   }
   el.now.textContent = (state.title? state.title+' · ' : '') + `Câu ${i+1}/${state.sentences.length}`;
   updateProgress();
@@ -992,7 +994,7 @@ function runFind(q, doScroll){
     findCur=0;
     state.sentences[findMarks[0]].node.classList.add('foundcur');
     el.findCount.textContent='1/'+findMarks.length+(capped?'+':'');
-    if(doScroll) state.sentences[findMarks[0]].node.scrollIntoView({block:'center',behavior:'smooth'});
+    if(doScroll) state.sentences[findMarks[0]].node.scrollIntoView({block:'center',behavior:'auto'});
   } else {
     el.findCount.textContent='Không thấy';
   }
@@ -1003,7 +1005,7 @@ function gotoFind(i){
   findCur=(i+findMarks.length)%findMarks.length;
   const cur=state.sentences[findMarks[findCur]];
   cur.node.classList.add('foundcur');
-  cur.node.scrollIntoView({block:'center',behavior:'smooth'});
+  cur.node.scrollIntoView({block:'center',behavior:'auto'});
   el.findCount.textContent=(findCur+1)+'/'+findMarks.length;
 }
 function openSearch(){
@@ -1036,16 +1038,22 @@ el.findInput.addEventListener('keydown',e=>{
 // ---------- Mục lục (tự dò "Chương N") ----------
 let tocEntries=[];
 const CHAP_RE=/^\s*(chương|chuong|hồi|hoi|quyển|quyen|phần|phan|chapter|chap)\s*[:.\-]?\s*\d+/i;
+const CHAP_NUM_RE=/(chương|chuong|hồi|hoi|quyển|quyen|phần|phan|chapter|chap)\s*[:.\-]?\s*(\d+)/i;
 function buildToc(){
-  tocEntries=[];
+  const byNum=new Map();   // số chương -> {label, idx, num} (giữ lần xuất hiện đầu tiên)
+  const noNum=[];
   for(let i=0;i<state.sentences.length;i++){
     const t=state.sentences[i].text.trim();
-    if(CHAP_RE.test(t)){
-      let label=(t.split(/[.!?…\n]/)[0]||t).trim();
-      if(label.length>64) label=label.slice(0,64)+'…';
-      tocEntries.push({label, idx:i});
-    }
+    if(!CHAP_RE.test(t)) continue;
+    let label=(t.split(/[.!?…\n]/)[0]||t).trim();
+    if(label.length>64) label=label.slice(0,64)+'…';
+    const nm=t.match(CHAP_NUM_RE);
+    const num=nm?parseInt(nm[2],10):null;
+    if(num!=null){ if(!byNum.has(num)) byNum.set(num,{label,idx:i,num}); }
+    else noNum.push({label,idx:i,num:Infinity});
   }
+  // sắp theo số chương tăng dần; mục không có số xếp cuối theo thứ tự xuất hiện
+  tocEntries=[...byNum.values()].sort((a,b)=>a.num-b.num).concat(noNum);
   renderToc('');
 }
 function renderToc(filter){
@@ -1071,7 +1079,7 @@ function gotoChapterAt(idx){
   state.idx=idx;
   const a=el.content.querySelector('.sent.active'); if(a) a.classList.remove('active');
   s.node.classList.add('active');
-  s.node.scrollIntoView({block:'start',behavior:'smooth'});
+  s.node.scrollIntoView({block:'start',behavior:'auto'});
 }
 function openToc(){ buildToc(); el.tocFilter.value=''; el.tocPanel.classList.add('open'); el.tocBackdrop.classList.add('open'); }
 function closeToc(){ el.tocPanel.classList.remove('open'); el.tocBackdrop.classList.remove('open'); }
@@ -1130,7 +1138,7 @@ async function openPdf(file){
     setMode('pdf');
     renderChapter('📄 '+file.name.replace(/\.pdf$/i,''), paras);
     setStatus('Đã mở PDF: '+n+' trang · '+paras.length+' đoạn. Bấm ▶ để nghe.', 'ok');
-    window.scrollTo({top:0,behavior:'smooth'});
+    window.scrollTo({top:0,behavior:'auto'});
   }catch(e){ setStatus('Lỗi đọc PDF: '+((e&&e.message)||e), 'err'); }
 }
 el.btnPdf.addEventListener('click',()=> el.pdfInput.click());
