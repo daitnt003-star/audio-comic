@@ -85,10 +85,10 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   }
   #chapTitle::after{content:"";display:block;width:46px;height:3px;border-radius:3px;background:var(--grad);margin:12px 0 18px}
-  #content .sent{cursor:pointer;border-radius:5px;transition:background .12s}
+  #content .sent{cursor:pointer;border-radius:5px;transition:background .12s;scroll-margin-top:130px}
   #content .sent.active{background:var(--hi);color:var(--hi-text)}
-  #content mark.find{background:#f97316;color:#fff;border-radius:3px;padding:0 1px}
-  #content mark.find.cur{background:#ef4444;color:#fff}
+  #content .sent.found{background:rgba(249,115,22,.35)}
+  #content .sent.foundcur{background:#ef4444;color:#fff}
   #content p{margin:0 0 1.05em;text-align:justify}
   .empty{color:var(--muted);text-align:center;padding:52px 16px}
   .empty .big{font-size:52px;margin-bottom:14px;opacity:.9}
@@ -128,6 +128,25 @@
   a{color:var(--accent)}
   .toggle-adv{font-size:12px;color:var(--accent);cursor:pointer;user-select:none;font-weight:600}
   .chip-label{font-size:12.5px;color:var(--muted);flex-shrink:0;font-weight:600}
+  /* Mục lục (bottom sheet) */
+  #tocBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:none}
+  #tocBackdrop.open{display:block}
+  #tocPanel{
+    position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--panel);
+    border-radius:18px 18px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.4);
+    max-height:80vh;display:none;flex-direction:column;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  #tocPanel.open{display:flex;animation:sheetUp .2s ease}
+  @keyframes sheetUp{from{transform:translateY(30px);opacity:.4}to{transform:none;opacity:1}}
+  .toc-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .toc-head b{flex:1;font-size:16px}
+  #tocFilter{width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--line);background:var(--panel2);color:var(--text);outline:none;font-size:16px}
+  #tocList{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 0}
+  .toc-item{display:block;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--line);
+    padding:14px 16px;color:var(--text);font-size:15px;font-weight:600;border-radius:0}
+  .toc-item:active{background:var(--panel2)}
+  .toc-empty{padding:22px 16px;color:var(--muted);font-size:14px;text-align:center}
   @media (max-width:400px){
     .field label{width:78px;font-size:12px}
     header{padding:10px 11px 11px}
@@ -148,6 +167,7 @@
       </div>
     </div>
     <button class="icon" id="btnPdf" title="Mở file PDF">📄</button>
+    <button class="icon" id="btnToc" title="Mục lục">📑</button>
     <button class="icon" id="btnSearch" title="Tìm trong chương">🔍</button>
     <button class="icon" id="btnSettings" title="Cài đặt">⚙️</button>
     <input type="file" id="pdfInput" accept="application/pdf,.pdf" style="display:none">
@@ -254,6 +274,18 @@
   </div>
 </main>
 
+<div id="tocBackdrop"></div>
+<div id="tocPanel">
+  <div class="toc-head">
+    <b>📑 Mục lục</b>
+    <button class="icon" id="tocClose" title="Đóng">✕</button>
+  </div>
+  <div style="padding:10px 16px 6px">
+    <input type="text" id="tocFilter" placeholder="Lọc theo số hoặc tên chương…" autocomplete="off" enterkeyhint="done">
+  </div>
+  <div id="tocList"></div>
+</div>
+
 <div id="player">
   <div id="progress"><div id="progressBar"></div></div>
   <div class="line1">
@@ -274,7 +306,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '2.2';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '2.4';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -292,6 +324,7 @@ const el = {
   findPrev:$('findPrev'), findNext:$('findNext'), verTag:$('verTag'),
   btnPdf:$('btnPdf'), pdfInput:$('pdfInput'),
   urlBar:$('urlBar'), chapJumpBar:$('chapJumpBar'), pdfBanner:$('pdfBanner'), pdfName:$('pdfName'), pdfExit:$('pdfExit'),
+  btnToc:$('btnToc'), tocPanel:$('tocPanel'), tocBackdrop:$('tocBackdrop'), tocClose:$('tocClose'), tocList:$('tocList'), tocFilter:$('tocFilter'),
 };
 
 // ---------- Persisted settings ----------
@@ -935,56 +968,42 @@ el.chapMinus.addEventListener('click',()=>{
   el.chapNum.value = cur-1; jumpToChapter(el.chapNum.value);
 });
 
-// ---------- Tìm kiếm trong chương ----------
-let findMarks = [];
+// ---------- Tìm kiếm trong chương (tô sáng cả câu — nhẹ, không sửa cấu trúc DOM) ----------
+let findMarks = [];   // mảng chỉ số câu khớp
 let findCur = -1;
+const FIND_MAX = 400;
 function clearFind(){
-  el.content.querySelectorAll('mark.find').forEach(m=>{ m.replaceWith(document.createTextNode(m.textContent)); });
-  el.content.querySelectorAll('.sent').forEach(s=>s.normalize());
+  for(const idx of findMarks){ const n=state.sentences[idx]&&state.sentences[idx].node; if(n) n.classList.remove('found','foundcur'); }
   findMarks=[]; findCur=-1; el.findCount.textContent='';
 }
-const FIND_MAX = 300;   // giới hạn để không đơ / tràn bộ nhớ với văn bản dài (PDF)
 function runFind(q, doScroll){
   clearFind();
-  q=(q||'').trim();
-  if(!q || q.length<1){ el.findCount.textContent=''; return; }
-  const rx=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+  q=(q||'').trim().toLowerCase();
+  if(!q){ el.findCount.textContent=''; return; }
   let capped=false;
-  const spans=el.content.querySelectorAll('.sent');
-  for(const span of spans){
-    if(findMarks.length>=FIND_MAX){ capped=true; break; }
-    const walker=document.createTreeWalker(span, NodeFilter.SHOW_TEXT, null);
-    const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
-    for(const node of nodes){
-      const text=node.nodeValue; rx.lastIndex=0;
-      if(!rx.test(text)) continue; rx.lastIndex=0;
-      const frag=document.createDocumentFragment(); let last=0,m;
-      while((m=rx.exec(text))){
-        if(m.index>last) frag.appendChild(document.createTextNode(text.slice(last,m.index)));
-        const mk=document.createElement('mark'); mk.className='find'; mk.textContent=m[0];
-        frag.appendChild(mk); findMarks.push(mk); last=m.index+m[0].length;
-        if(m.index===rx.lastIndex) rx.lastIndex++;
-        if(findMarks.length>=FIND_MAX) break;
-      }
-      if(last<text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-      node.replaceWith(frag);
+  for(let i=0;i<state.sentences.length;i++){
+    if(state.sentences[i].text.toLowerCase().indexOf(q)!==-1){
+      state.sentences[i].node.classList.add('found');
+      findMarks.push(i);
       if(findMarks.length>=FIND_MAX){ capped=true; break; }
     }
   }
   if(findMarks.length){
-    findCur=0; findMarks[0].classList.add('cur');
-    el.findCount.textContent = (capped?'1/'+FIND_MAX+'+':'1/'+findMarks.length);
-    if(doScroll) findMarks[0].scrollIntoView({block:'center',behavior:'smooth'});
+    findCur=0;
+    state.sentences[findMarks[0]].node.classList.add('foundcur');
+    el.findCount.textContent='1/'+findMarks.length+(capped?'+':'');
+    if(doScroll) state.sentences[findMarks[0]].node.scrollIntoView({block:'center',behavior:'smooth'});
   } else {
     el.findCount.textContent='Không thấy';
   }
 }
 function gotoFind(i){
   if(!findMarks.length) return;
-  if(findCur>=0 && findMarks[findCur]) findMarks[findCur].classList.remove('cur');
+  const prev=state.sentences[findMarks[findCur]]; if(prev) prev.node.classList.remove('foundcur');
   findCur=(i+findMarks.length)%findMarks.length;
-  const m=findMarks[findCur]; m.classList.add('cur');
-  m.scrollIntoView({block:'center',behavior:'smooth'});
+  const cur=state.sentences[findMarks[findCur]];
+  cur.node.classList.add('foundcur');
+  cur.node.scrollIntoView({block:'center',behavior:'smooth'});
   el.findCount.textContent=(findCur+1)+'/'+findMarks.length;
 }
 function openSearch(){
@@ -1014,6 +1033,53 @@ el.findInput.addEventListener('keydown',e=>{
     return false;
   }
 });
+// ---------- Mục lục (tự dò "Chương N") ----------
+let tocEntries=[];
+const CHAP_RE=/^\s*(chương|chuong|hồi|hoi|quyển|quyen|phần|phan|chapter|chap)\s*[:.\-]?\s*\d+/i;
+function buildToc(){
+  tocEntries=[];
+  for(let i=0;i<state.sentences.length;i++){
+    const t=state.sentences[i].text.trim();
+    if(CHAP_RE.test(t)){
+      let label=(t.split(/[.!?…\n]/)[0]||t).trim();
+      if(label.length>64) label=label.slice(0,64)+'…';
+      tocEntries.push({label, idx:i});
+    }
+  }
+  renderToc('');
+}
+function renderToc(filter){
+  el.tocList.innerHTML='';
+  const f=(filter||'').trim().toLowerCase();
+  const items=f? tocEntries.filter(e=>e.label.toLowerCase().indexOf(f)!==-1) : tocEntries;
+  if(!items.length){
+    const d=document.createElement('div'); d.className='toc-empty';
+    d.textContent = tocEntries.length? 'Không có chương khớp bộ lọc.' : 'Không dò được dòng "Chương ..." trong nội dung này. (Mục lục hợp với truyện/PDF nhiều chương.)';
+    el.tocList.appendChild(d); return;
+  }
+  const frag=document.createDocumentFragment();
+  for(const e of items){
+    const b=document.createElement('button'); b.type='button'; b.className='toc-item'; b.textContent=e.label;
+    b.addEventListener('click',()=>gotoChapterAt(e.idx));
+    frag.appendChild(b);
+  }
+  el.tocList.appendChild(frag);
+}
+function gotoChapterAt(idx){
+  closeToc();
+  const s=state.sentences[idx]; if(!s) return;
+  state.idx=idx;
+  const a=el.content.querySelector('.sent.active'); if(a) a.classList.remove('active');
+  s.node.classList.add('active');
+  s.node.scrollIntoView({block:'start',behavior:'smooth'});
+}
+function openToc(){ buildToc(); el.tocFilter.value=''; el.tocPanel.classList.add('open'); el.tocBackdrop.classList.add('open'); }
+function closeToc(){ el.tocPanel.classList.remove('open'); el.tocBackdrop.classList.remove('open'); }
+el.btnToc.addEventListener('click', openToc);
+el.tocClose.addEventListener('click', closeToc);
+el.tocBackdrop.addEventListener('click', closeToc);
+el.tocFilter.addEventListener('input',()=> renderToc(el.tocFilter.value));
+
 el.findPrev.addEventListener('click',()=>{ if(findMarks.length) gotoFind(findCur-1); else runFind(el.findInput.value,true); });
 el.findNext.addEventListener('click',()=>{ if(findMarks.length) gotoFind(findCur+1); else runFind(el.findInput.value,true); });
 el.findClear.addEventListener('click',()=>{ el.findInput.value=''; clearFind(); el.findInput.focus(); });
