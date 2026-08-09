@@ -86,9 +86,9 @@
   }
   #chapTitle::after{content:"";display:block;width:46px;height:3px;border-radius:3px;background:var(--grad);margin:12px 0 18px}
   #content .sent{cursor:pointer;border-radius:5px;transition:background .12s}
-  #content .sent.active{background:var(--hi);color:var(--hi-text);box-shadow:0 0 0 4px var(--hi)}
+  #content .sent.active{background:var(--hi);color:var(--hi-text)}
   #content mark.find{background:#f97316;color:#fff;border-radius:3px;padding:0 1px}
-  #content mark.find.cur{background:#ef4444;box-shadow:0 0 0 2px #ef4444}
+  #content mark.find.cur{background:#ef4444;color:#fff}
   #content p{margin:0 0 1.05em;text-align:justify}
   .empty{color:var(--muted);text-align:center;padding:52px 16px}
   .empty .big{font-size:52px;margin-bottom:14px;opacity:.9}
@@ -96,8 +96,7 @@
   /* bottom player bar */
   #player{
     position:fixed;left:0;right:0;bottom:0;z-index:30;
-    background:color-mix(in srgb,var(--panel) 92%,transparent);
-    -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    background:var(--panel);
     border-top:1px solid var(--line);
     padding:10px 14px calc(11px + env(safe-area-inset-bottom));
     box-shadow:0 -8px 30px rgba(0,0,0,.3);
@@ -275,7 +274,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '2.1';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '2.2';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -603,21 +602,27 @@ function renderChapter(title, paras){
   state.sentences=[]; state.idx=0;
   if(el.findInput){ el.findInput.value=''; el.findCount.textContent=''; }
   findMarks=[]; findCur=-1;
+  const frag = document.createDocumentFragment();
   for(const para of paras){
     const p = document.createElement('p');
     const sents = splitSentences(para);
     for(const s of sents){
       const span = document.createElement('span');
       span.className='sent';
+      span.dataset.i = state.sentences.length;   // dùng event-delegation thay vì listener từng câu
       span.textContent = s+' ';
-      const myIndex = state.sentences.length;
-      span.addEventListener('click',()=>{ startSpeak(myIndex); });
       p.appendChild(span);
       state.sentences.push({text:s, node:span});
     }
-    el.content.appendChild(p);
+    frag.appendChild(p);
   }
+  el.content.appendChild(frag);   // gắn 1 lần → nhẹ bộ nhớ hơn nhiều với nội dung dài
 }
+// một listener duy nhất cho toàn bộ nội dung
+el.content.addEventListener('click',e=>{
+  const sp = e.target.closest && e.target.closest('.sent');
+  if(sp && sp.dataset.i!=null) startSpeak(parseInt(sp.dataset.i,10));
+});
 
 // ============================================================
 //  TEXT-TO-SPEECH
@@ -938,7 +943,7 @@ function clearFind(){
   el.content.querySelectorAll('.sent').forEach(s=>s.normalize());
   findMarks=[]; findCur=-1; el.findCount.textContent='';
 }
-const FIND_MAX = 600;   // giới hạn để không đơ với văn bản dài (PDF)
+const FIND_MAX = 300;   // giới hạn để không đơ / tràn bộ nhớ với văn bản dài (PDF)
 function runFind(q, doScroll){
   clearFind();
   q=(q||'').trim();
