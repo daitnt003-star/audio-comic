@@ -156,7 +156,7 @@
     <span id="findCount" style="font-size:12px;color:var(--muted);flex-shrink:0;min-width:64px;text-align:right"></span>
     <button class="icon" id="findClear" title="Xóa tìm kiếm">✕</button>
   </div>
-  <div class="row" style="margin-top:11px">
+  <div class="row" id="urlBar" style="margin-top:11px">
     <input type="url" id="urlInput" placeholder="Dán link chương truyện vào đây…" autocomplete="off" inputmode="url">
     <button class="primary" id="btnLoad">Tải</button>
   </div>
@@ -167,6 +167,10 @@
       style="width:70px;flex:0 0 auto;text-align:center;padding:10px">
     <button class="icon" id="chapPlus" title="Chương sau">+</button>
     <button id="chapGo" style="flex:1">Đi tới chương</button>
+  </div>
+  <div class="row" id="pdfBanner" style="margin-top:11px;display:none">
+    <span style="flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📄 <span id="pdfName"></span></span>
+    <button id="pdfExit" style="flex:0 0 auto">✕ Thoát PDF</button>
   </div>
   <div class="status" id="status">Dán link một chương bất kỳ rồi bấm Tải, hoặc bấm ▶ để nghe.</div>
 
@@ -282,6 +286,7 @@ const el = {
   chapNum:$('chapNum'), chapPlus:$('chapPlus'), chapMinus:$('chapMinus'), chapGo:$('chapGo'),
   btnSearch:$('btnSearch'), searchBar:$('searchBar'), findInput:$('findInput'), findCount:$('findCount'), findClear:$('findClear'),
   btnPdf:$('btnPdf'), pdfInput:$('pdfInput'),
+  urlBar:$('urlBar'), chapJumpBar:$('chapJumpBar'), pdfBanner:$('pdfBanner'), pdfName:$('pdfName'), pdfExit:$('pdfExit'),
 };
 
 // ---------- Persisted settings ----------
@@ -313,7 +318,15 @@ let state = {
   paused: false,
   autoNext: store.get('autoNext',1),
   proxyPref: store.get('proxyPref',0),
+  mode: 'web',
 };
+function setMode(mode){
+  state.mode=mode;
+  const pdf = mode==='pdf';
+  el.urlBar.style.display = pdf?'none':'flex';
+  el.chapJumpBar.style.display = pdf?'none':'flex';
+  el.pdfBanner.style.display = pdf?'flex':'none';
+}
 
 el.url.value = state.url;
 
@@ -541,6 +554,7 @@ async function loadChapter(url, {autoplay=false}={}){
     el.url.value = url;
     const cn = currentChapterNum(url); if(cn!=null) el.chapNum.value = cn;
     store.set('lastUrl', url);
+    setMode('web');
     renderChapter(title, paras);
     setStatus(`Đã tải: ${title}` + (nav.nextUrl?(nextGuessed?' · chương sau (đoán theo số) ✓':' · có chương sau ✓'):' · (không có chương sau)'), 'ok');
     el.next.style.opacity = nav.nextUrl?1:.4;
@@ -914,30 +928,41 @@ function clearFind(){
   el.content.querySelectorAll('.sent').forEach(s=>s.normalize());
   findMarks=[]; findCur=-1; el.findCount.textContent='';
 }
-function runFind(q){
+const FIND_MAX = 600;   // giới hạn để không đơ với văn bản dài (PDF)
+function runFind(q, doScroll){
   clearFind();
   q=(q||'').trim();
-  if(!q) return;
+  if(!q || q.length<1){ el.findCount.textContent=''; return; }
   const rx=new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
-  el.content.querySelectorAll('.sent').forEach(span=>{
+  let capped=false;
+  const spans=el.content.querySelectorAll('.sent');
+  for(const span of spans){
+    if(findMarks.length>=FIND_MAX){ capped=true; break; }
     const walker=document.createTreeWalker(span, NodeFilter.SHOW_TEXT, null);
     const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
-    nodes.forEach(node=>{
+    for(const node of nodes){
       const text=node.nodeValue; rx.lastIndex=0;
-      if(!rx.test(text)) return; rx.lastIndex=0;
+      if(!rx.test(text)) continue; rx.lastIndex=0;
       const frag=document.createDocumentFragment(); let last=0,m;
       while((m=rx.exec(text))){
         if(m.index>last) frag.appendChild(document.createTextNode(text.slice(last,m.index)));
         const mk=document.createElement('mark'); mk.className='find'; mk.textContent=m[0];
         frag.appendChild(mk); findMarks.push(mk); last=m.index+m[0].length;
         if(m.index===rx.lastIndex) rx.lastIndex++;
+        if(findMarks.length>=FIND_MAX) break;
       }
       if(last<text.length) frag.appendChild(document.createTextNode(text.slice(last)));
       node.replaceWith(frag);
-    });
-  });
-  if(findMarks.length){ el.findCount.textContent='1/'+findMarks.length; gotoFind(0); }
-  else el.findCount.textContent='Không thấy';
+      if(findMarks.length>=FIND_MAX){ capped=true; break; }
+    }
+  }
+  if(findMarks.length){
+    findCur=0; findMarks[0].classList.add('cur');
+    el.findCount.textContent = (capped?'1/'+FIND_MAX+'+':'1/'+findMarks.length);
+    if(doScroll) findMarks[0].scrollIntoView({block:'center',behavior:'smooth'});
+  } else {
+    el.findCount.textContent='Không thấy';
+  }
 }
 function gotoFind(i){
   if(!findMarks.length) return;
@@ -949,12 +974,20 @@ function gotoFind(i){
 }
 el.btnSearch.addEventListener('click',()=>{
   const open = el.searchBar.style.display!=='none';
-  if(open){ el.searchBar.style.display='none'; clearFind(); }
+  if(open){ el.searchBar.style.display='none'; clearFind(); el.findInput.value=''; }
   else { el.searchBar.style.display='flex'; el.findInput.focus(); }
 });
-let findTimer=null;
-el.findInput.addEventListener('input',()=>{ clearTimeout(findTimer); findTimer=setTimeout(()=>runFind(el.findInput.value),200); });
-el.findInput.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); if(findMarks.length) gotoFind(findCur+1); else runFind(el.findInput.value); } });
+let findTimer=null, findComposing=false;
+el.findInput.addEventListener('compositionstart',()=>{ findComposing=true; });
+el.findInput.addEventListener('compositionend',()=>{ findComposing=false; clearTimeout(findTimer); findTimer=setTimeout(()=>runFind(el.findInput.value,false),250); });
+el.findInput.addEventListener('input',()=>{
+  if(findComposing) return;                 // đang gõ dấu tiếng Việt → chờ xong
+  clearTimeout(findTimer);
+  findTimer=setTimeout(()=>runFind(el.findInput.value,false),350);  // không cuộn khi gõ
+});
+el.findInput.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){ e.preventDefault(); if(findMarks.length) gotoFind(findCur+1); else runFind(el.findInput.value,true); }
+});
 el.findClear.addEventListener('click',()=>{ el.findInput.value=''; clearFind(); el.findInput.focus(); });
 
 // ---------- Mở & đọc file PDF ----------
@@ -999,13 +1032,24 @@ async function openPdf(file){
     }
     state.nextUrl=null; state.prevUrl=null; state.url='';
     el.next.style.opacity=.4; el.prev.style.opacity=.4; el.chapNum.value='';
+    el.pdfName.textContent=file.name;
+    setMode('pdf');
     renderChapter('📄 '+file.name.replace(/\.pdf$/i,''), paras);
-    setStatus('Đã mở PDF: '+n+' trang · '+paras.length+' đoạn. Bấm ▶ để nghe, tự next sẽ tắt.', 'ok');
+    setStatus('Đã mở PDF: '+n+' trang · '+paras.length+' đoạn. Bấm ▶ để nghe.', 'ok');
     window.scrollTo({top:0,behavior:'smooth'});
   }catch(e){ setStatus('Lỗi đọc PDF: '+((e&&e.message)||e), 'err'); }
 }
 el.btnPdf.addEventListener('click',()=> el.pdfInput.click());
 el.pdfInput.addEventListener('change',e=>{ const f=e.target.files&&e.target.files[0]; openPdf(f); e.target.value=''; });
+el.pdfExit.addEventListener('click',()=>{
+  stopSpeak();
+  setMode('web');
+  el.content.innerHTML=''; el.title.style.display='none'; el.empty.style.display='';
+  state.sentences=[]; state.idx=0; findMarks=[]; findCur=-1;
+  if(el.searchBar.style.display!=='none'){ el.searchBar.style.display='none'; el.findInput.value=''; el.findCount.textContent=''; }
+  el.next.style.opacity=.4; el.prev.style.opacity=.4;
+  setStatus('Đã thoát PDF. Dán link truyện để đọc tiếp.', '');
+});
 el.fontSize.addEventListener('input',()=>{
   document.documentElement.style.setProperty('--fz', el.fontSize.value+'px');
   el.fontVal.textContent=el.fontSize.value; store.set('font', el.fontSize.value);
@@ -1057,6 +1101,7 @@ el.btnManual.addEventListener('click',()=>{
   const an=String(store.get('autoNext',1));
   el.autonextSeg.querySelectorAll('button').forEach(b=>b.classList.toggle('sel', b.dataset.auto===an));
   syncSpeedSeg();
+  setMode('web');
   const cn=currentChapterNum(state.url); if(cn!=null) el.chapNum.value=cn;
 })();
 
