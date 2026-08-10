@@ -310,7 +310,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '2.7';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '2.8';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -705,10 +705,8 @@ function loadVoices(){
   el.voiceSel.innerHTML='';
   // Giọng server (neural, chạy nền) — chỉ hiện khi đã cấu hình URL server
   if(serverUrl){
-    [['srv:vi-VN-HoaiMyNeural','🔊 Hoài My — nữ (server, chạy nền)'],
-     ['srv:vi-VN-NamMinhNeural','🔊 Nam Minh — nam (server, chạy nền)']].forEach(([val,txt])=>{
-      const o=document.createElement('option'); o.value=val; o.textContent=txt; el.voiceSel.appendChild(o);
-    });
+    const o=document.createElement('option'); o.value='srv:google';
+    o.textContent='🔊 Giọng server — chạy nền, phát chung Maps'; el.voiceSel.appendChild(o);
   }
   // chỉ hiển thị giọng tiếng Việt và tiếng Anh
   const shown = voices.filter(v=>/^(vi|en)/i.test(v.lang));
@@ -723,7 +721,7 @@ function loadVoices(){
     const o=document.createElement('option'); o.textContent='(chưa có giọng Việt/Anh — xem hướng dẫn bên dưới)'; el.voiceSel.appendChild(o);
   }
   if(saved && ((saved.startsWith('srv:')&&serverUrl) || voices.some(v=>v.voiceURI===saved))) el.voiceSel.value=saved;
-  else if(serverUrl){ el.voiceSel.value='srv:vi-VN-HoaiMyNeural'; }
+  else if(serverUrl){ el.voiceSel.value='srv:google'; }
   else {
     // ưu tiên giọng Việt chất lượng cao nhất
     const vi=voices.filter(v=>/vi/i.test(v.lang)).sort((a,b)=>voiceQuality(b)-voiceQuality(a))[0];
@@ -743,10 +741,7 @@ function googleTTS(text){
   return 'https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q='+encodeURIComponent(text.slice(0,200));
 }
 function serverTtsUrl(text){
-  const r = Math.round((parseFloat(el.rate.value)||1)*100 - 100);
-  const rate = (r>=0?'+':'')+r+'%';
-  const voice = el.voiceSel.value.slice(4);
-  return serverUrl.replace(/\/+$/,'') + '/?text='+encodeURIComponent(text.slice(0,700)) + '&voice='+encodeURIComponent(voice) + '&rate='+encodeURIComponent(rate);
+  return serverUrl.replace(/\/+$/,'') + '/?text='+encodeURIComponent(text.slice(0,600)) + '&lang=vi';
 }
 function fetchTtsBlob(text){
   return fetch(serverTtsUrl(text)).then(r=>{ if(!r.ok) throw new Error('server '+r.status); return r.blob(); }).then(b=>URL.createObjectURL(b));
@@ -774,7 +769,7 @@ async function speakServer(i, text){
     audioEl.onended=null; audioEl.onerror=null;
     audioEl.__i=i;
     audioEl.src=blobUrl;
-    audioEl.playbackRate=1;
+    audioEl.playbackRate=Math.min(Math.max(parseFloat(el.rate.value)||1,0.5),3);   // tốc độ qua audio (Google không chỉnh sẵn)
     audioEl.onended=()=>{ try{URL.revokeObjectURL(blobUrl);}catch(e){} if(state.reading && audioEl.__i===i) speakSentence(i+1); };
     audioEl.onerror=()=>{ try{URL.revokeObjectURL(blobUrl);}catch(e){} serverFallback(i,text); };
     const p=audioEl.play(); if(p&&p.catch) p.catch(()=>serverFallback(i,text));
