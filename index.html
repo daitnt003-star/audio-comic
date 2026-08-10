@@ -147,6 +147,12 @@
     padding:14px 16px;color:var(--text);font-size:15px;font-weight:600;border-radius:0}
   .toc-item:active{background:var(--panel2)}
   .toc-empty{padding:22px 16px;color:var(--muted);font-size:14px;text-align:center}
+  #histBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:none}
+  #histBackdrop.open{display:block}
+  #histPanel{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--panel);border-radius:18px 18px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.4);max-height:80vh;display:none;flex-direction:column;padding-bottom:env(safe-area-inset-bottom)}
+  #histPanel.open{display:flex;animation:sheetUp .2s ease}
+  .toc-item small{display:block;font-weight:400;color:var(--muted);font-size:12px;margin-top:3px}
+  .toc-item .del{float:right;color:var(--muted);font-weight:700;padding:0 4px}
   @media (max-width:400px){
     .field label{width:78px;font-size:12px}
     header{padding:10px 11px 11px}
@@ -168,6 +174,7 @@
     </div>
     <button class="icon" id="btnPdf" title="Mở file PDF">📄</button>
     <button class="icon" id="btnToc" title="Mục lục">📑</button>
+    <button class="icon" id="btnHist" title="Lịch sử đọc">🕘</button>
     <button class="icon" id="btnSearch" title="Tìm trong chương">🔍</button>
     <button class="icon" id="btnSettings" title="Cài đặt">⚙️</button>
     <input type="file" id="pdfInput" accept="application/pdf,.pdf" style="display:none">
@@ -194,6 +201,10 @@
   <div class="row" id="pdfBanner" style="margin-top:11px;display:none">
     <span style="flex:1;min-width:0;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📄 <span id="pdfName"></span></span>
     <button id="pdfExit" style="flex:0 0 auto">✕ Thoát PDF</button>
+  </div>
+  <div class="row" id="resumeBanner" style="margin-top:9px;display:none">
+    <button class="primary" id="resumeGo" style="flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">▶ Tiếp tục: <span id="resumeLabel"></span></button>
+    <button class="icon" id="resumeClose" title="Bỏ qua">✕</button>
   </div>
   <div class="status" id="status">Dán link một chương bất kỳ rồi bấm Tải, hoặc bấm ▶ để nghe.</div>
 
@@ -278,6 +289,16 @@
   </div>
 </main>
 
+<div id="histBackdrop"></div>
+<div id="histPanel">
+  <div class="toc-head">
+    <b>🕘 Lịch sử đọc</b>
+    <button class="icon" id="histClear" title="Xoá hết" style="font-size:13px;padding:8px 10px">Xoá hết</button>
+    <button class="icon" id="histClose" title="Đóng">✕</button>
+  </div>
+  <div id="histList"></div>
+</div>
+
 <div id="tocBackdrop"></div>
 <div id="tocPanel">
   <div class="toc-head">
@@ -310,7 +331,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '2.8';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '2.9';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -329,6 +350,8 @@ const el = {
   btnPdf:$('btnPdf'), pdfInput:$('pdfInput'),
   urlBar:$('urlBar'), chapJumpBar:$('chapJumpBar'), pdfBanner:$('pdfBanner'), pdfName:$('pdfName'), pdfExit:$('pdfExit'),
   btnToc:$('btnToc'), tocPanel:$('tocPanel'), tocBackdrop:$('tocBackdrop'), tocClose:$('tocClose'), tocList:$('tocList'), tocFilter:$('tocFilter'),
+  btnHist:$('btnHist'), histPanel:$('histPanel'), histBackdrop:$('histBackdrop'), histClose:$('histClose'), histClear:$('histClear'), histList:$('histList'),
+  resumeBanner:$('resumeBanner'), resumeGo:$('resumeGo'), resumeClose:$('resumeClose'), resumeLabel:$('resumeLabel'),
 };
 
 // ---------- Persisted settings ----------
@@ -605,6 +628,7 @@ async function loadChapter(url, {autoplay=false}={}){
     setStatus(`Đã tải: ${title}` + (nav.nextUrl?(nextGuessed?' · chương sau (đoán theo số) ✓':' · có chương sau ✓'):' · (không có chương sau)'), 'ok');
     el.next.style.opacity = nav.nextUrl?1:.4;
     el.prev.style.opacity = nav.prevUrl?1:.4;
+    saveProgress(true);
     if(autoplay) startSpeak(0);
     window.scrollTo({top:0,behavior:'auto'});
     return true;
@@ -856,6 +880,7 @@ function pauseSpeak(){
   if(currentEngine==='online'){ try{ audioEl.pause(); }catch(e){} }
   else { try{ synth.pause(); }catch(e){} }
   el.now.textContent='Tạm dừng';
+  saveProgress(true);
 }
 
 function stopSpeak(){
@@ -925,6 +950,7 @@ function highlight(i){
   }
   el.now.textContent = (state.title? state.title+' · ' : '') + `Câu ${i+1}/${state.sentences.length}`;
   updateProgress();
+  saveProgress(false);
 }
 function clearHighlight(){ const a=el.content.querySelector('.sent.active'); if(a)a.classList.remove('active'); }
 function updateProgress(){
@@ -1153,6 +1179,7 @@ function gotoChapterAt(idx){
   const a=el.content.querySelector('.sent.active'); if(a) a.classList.remove('active');
   s.node.classList.add('active');
   s.node.scrollIntoView({block:'start',behavior:'auto'});
+  saveProgress(true);
 }
 function openToc(){ buildToc(); el.tocFilter.value=''; el.tocPanel.classList.add('open'); el.tocBackdrop.classList.add('open'); }
 function closeToc(){ el.tocPanel.classList.remove('open'); el.tocBackdrop.classList.remove('open'); }
@@ -1160,6 +1187,97 @@ el.btnToc.addEventListener('click', openToc);
 el.tocClose.addEventListener('click', closeToc);
 el.tocBackdrop.addEventListener('click', closeToc);
 el.tocFilter.addEventListener('input',()=> renderToc(el.tocFilter.value));
+
+// ---------- Lưu tiến độ đọc + Lịch sử ----------
+let lastSaveTs = 0;
+function progressKey(it){ return it.type+'|'+(it.url||it.title); }
+function saveProgress(force){
+  if(!state.sentences.length) return;
+  const now = Date.now();
+  if(!force && now - lastSaveTs < 2500) return;
+  lastSaveTs = now;
+  const cur = { type: state.mode==='pdf'?'pdf':'web', url: state.url||'', title: state.title||'', idx: state.idx||0, total: state.sentences.length, ts: now };
+  if(cur.type==='pdf') cur.paras = state.sentences.map(s=>s.text);
+  try{ store.set('resume', cur); }
+  catch(e){ const c2=Object.assign({},cur); delete c2.paras; try{ store.set('resume',c2); }catch(e2){} }
+  let hist = store.get('history', []);
+  const key = progressKey(cur);
+  hist = hist.filter(h=>progressKey(h)!==key);
+  hist.unshift({ type:cur.type, url:cur.url, title:cur.title, idx:cur.idx, total:cur.total, ts:cur.ts });
+  hist = hist.slice(0,30);
+  try{ store.set('history', hist); }catch(e){}
+}
+function jumpToIdx(idx){
+  const s=state.sentences[idx]; if(!s) return;
+  state.idx=idx;
+  const a=el.content.querySelector('.sent.active'); if(a) a.classList.remove('active');
+  s.node.classList.add('active');
+  try{ s.node.scrollIntoView({block:'center',behavior:'auto'}); }catch(e){}
+  updateProgress();
+}
+async function resumeFrom(it){
+  if(!it) return false;
+  if(it.type==='pdf'){
+    if(!it.paras || !it.paras.length){ setStatus('Mục PDF này cần bấm 📄 mở lại file để tiếp tục.', ''); return false; }
+    stopSpeak();
+    state.nextUrl=null; state.prevUrl=null; state.url='';
+    el.pdfName.textContent=(it.title||'PDF').replace(/^📄\s*/,''); setMode('pdf');
+    renderChapter(it.title||'📄 PDF', it.paras);
+    jumpToIdx(Math.min(it.idx||0, state.sentences.length-1));
+    setStatus('Đã mở lại PDF ngay chỗ đang đọc.', 'ok');
+    return true;
+  } else if(it.url){
+    const ok = await loadChapter(it.url);
+    if(ok) jumpToIdx(Math.min(it.idx||0, state.sentences.length-1));
+    return ok;
+  }
+  return false;
+}
+function maybeShowResume(){
+  const r = store.get('resume', null);
+  if(r && (r.url || (r.type==='pdf' && r.paras))){
+    el.resumeLabel.textContent = (r.title||'chương trước').replace(/^📄\s*/,'') + (r.total? ' · câu '+((r.idx||0)+1)+'/'+r.total : '');
+    el.resumeBanner.style.display='flex';
+    el.resumeBanner.__item = r;
+  }
+}
+el.resumeGo.addEventListener('click',()=>{ const it=el.resumeBanner.__item; el.resumeBanner.style.display='none'; resumeFrom(it); });
+el.resumeClose.addEventListener('click',()=>{ el.resumeBanner.style.display='none'; });
+
+function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function timeAgo(ts){ const s=Math.floor((Date.now()-ts)/1000); if(s<60)return'vừa xong'; if(s<3600)return Math.floor(s/60)+' phút trước'; if(s<86400)return Math.floor(s/3600)+' giờ trước'; return Math.floor(s/86400)+' ngày trước'; }
+function renderHist(){
+  const hist = store.get('history', []);
+  el.histList.innerHTML='';
+  if(!hist.length){ const d=document.createElement('div'); d.className='toc-empty'; d.textContent='Chưa có lịch sử.'; el.histList.appendChild(d); return; }
+  const r=store.get('resume',null);
+  const frag=document.createDocumentFragment();
+  hist.forEach(h=>{
+    const b=document.createElement('button'); b.type='button'; b.className='toc-item';
+    const icon=h.type==='pdf'?'📄 ':'📖 ';
+    const pct = h.total? ('đọc '+Math.round(((h.idx||0)+1)/h.total*100)+'% · ') : '';
+    const pdfNote = (h.type==='pdf' && !(r&&r.type==='pdf'&&r.paras&&progressKey(r)===progressKey(h))) ? ' · cần mở lại file' : '';
+    b.innerHTML = icon + escapeHtml(h.title||h.url||'(không tên)') + '<small>'+ pct + timeAgo(h.ts) + pdfNote +'</small>';
+    b.addEventListener('click',()=>{ closeHist(); openHistItem(h); });
+    frag.appendChild(b);
+  });
+  el.histList.appendChild(frag);
+}
+async function openHistItem(h){
+  if(h.type==='pdf'){
+    const r=store.get('resume',null);
+    if(r && r.type==='pdf' && r.paras && progressKey(r)===progressKey(h)) resumeFrom(r);
+    else setStatus('PDF "'+(h.title||'')+'": hãy bấm 📄 mở lại file để đọc tiếp (trình duyệt không giữ được file cục bộ).', '');
+  } else resumeFrom(h);
+}
+function openHist(){ renderHist(); el.histPanel.classList.add('open'); el.histBackdrop.classList.add('open'); }
+function closeHist(){ el.histPanel.classList.remove('open'); el.histBackdrop.classList.remove('open'); }
+el.btnHist.addEventListener('click', openHist);
+el.histClose.addEventListener('click', closeHist);
+el.histBackdrop.addEventListener('click', closeHist);
+el.histClear.addEventListener('click',()=>{ store.set('history',[]); store.set('resume',null); renderHist(); el.resumeBanner.style.display='none'; });
+window.addEventListener('pagehide',()=>saveProgress(true));
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') saveProgress(true); });
 
 el.findPrev.addEventListener('click',()=>{ if(findMarks.length) gotoFind(findCur-1); else runFind(el.findInput.value,true); });
 el.findNext.addEventListener('click',()=>{ if(findMarks.length) gotoFind(findCur+1); else runFind(el.findInput.value,true); });
@@ -1210,6 +1328,7 @@ async function openPdf(file){
     el.pdfName.textContent=file.name;
     setMode('pdf');
     renderChapter('📄 '+file.name.replace(/\.pdf$/i,''), paras);
+    saveProgress(true);
     setStatus('Đã mở PDF: '+n+' trang · '+paras.length+' đoạn. Bấm ▶ để nghe.', 'ok');
     window.scrollTo({top:0,behavior:'auto'});
   }catch(e){ setStatus('Lỗi đọc PDF: '+((e&&e.message)||e), 'err'); }
@@ -1277,6 +1396,7 @@ el.btnManual.addEventListener('click',()=>{
   el.autonextSeg.querySelectorAll('button').forEach(b=>b.classList.toggle('sel', b.dataset.auto===an));
   syncSpeedSeg();
   setMode('web');
+  maybeShowResume();
   if(el.verTag) el.verTag.textContent='v'+APP_VERSION;
   document.title='Đọc Truyện Audio v'+APP_VERSION;
   // phòng xa: mọi <button> đều là type=button để không bao giờ submit/tải lại trang
