@@ -331,7 +331,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '2.9';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '3.0';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -703,6 +703,16 @@ const GOOGLE_VAL = '__google__';
 const audioEl = new Audio();
 audioEl.preload = 'auto';
 audioEl.setAttribute('playsinline','');
+// iOS đôi khi tự tạm dừng audio khi tắt màn hình → tự phát lại nếu ta vẫn đang đọc bằng giọng server
+audioEl.addEventListener('pause', ()=>{
+  if(state.reading && currentEngine==='online' && !audioEl.ended){
+    setTimeout(()=>{
+      if(state.reading && currentEngine==='online' && audioEl.paused && !audioEl.ended){
+        const pr=audioEl.play(); if(pr && pr.catch) pr.catch(()=>{});
+      }
+    }, 400);
+  }
+});
 let serverUrl = store.get('srvUrl','');
 let serverWarned = false;
 let srvPrefetch = null;   // {i, promise<blobUrl>}
@@ -880,6 +890,7 @@ function pauseSpeak(){
   if(currentEngine==='online'){ try{ audioEl.pause(); }catch(e){} }
   else { try{ synth.pause(); }catch(e){} }
   el.now.textContent='Tạm dừng';
+  if('mediaSession' in navigator){ try{ navigator.mediaSession.playbackState='paused'; }catch(e){} }
   saveProgress(true);
 }
 
