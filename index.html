@@ -253,27 +253,24 @@
         <button data-auto="0">Tắt</button>
       </div>
     </div>
-    <div class="hint">
-      <b>🎙️ Muốn giọng đọc hay hơn?</b> Giọng "mặc định" của máy thường nghe khô. Hãy tải thêm
-      <b>giọng tiếng Việt "Nâng cao"/"Cao cấp"</b> — tự nhiên hơn nhiều — rồi chọn ở ô Giọng đọc phía trên (có dấu ⭐):<br>
-      • <b>iPhone/iPad:</b> Cài đặt → Trợ năng → Nội dung nói → Giọng nói → Tiếng Việt → tải bản <b>Nâng cao</b>.<br>
-      • <b>Android:</b> Cài đặt → Quản lý chung → Văn bản thành giọng nói → cài <b>Google giọng nói</b> → tải dữ liệu Tiếng Việt.<br>
-      • <b>macOS:</b> Cài đặt hệ thống → Trợ năng → Nội dung nói → Giọng nói → Quản lý → Tiếng Việt → tải <b>Linh (Nâng cao)</b>.<br>
-      Sau khi tải xong, mở lại app là giọng mới hiện ra trong danh sách.
-      <span class="toggle-adv" id="advToggle">· Nâng cao</span>
-      <div id="adv" style="display:none;margin-top:8px">
-        <div class="field"><label>Server giọng</label>
-          <input type="url" id="srvUrl" placeholder="https://…workers.dev" autocomplete="off" inputmode="url">
-        </div>
-        <div style="font-size:11px;color:var(--muted);margin:-4px 0 8px">Dán URL Cloudflare Worker để dùng giọng neural "chạy nền" + phát chung Google Maps (xem hướng dẫn kèm file). Sau đó chọn giọng 🔊 ở ô Giọng đọc.</div>
-        <div class="field"><label>Nội dung</label>
-          <select id="selContent"><option value="auto">Tự dò (khuyên dùng)</option></select>
-        </div>
-        <div class="field"><label>CORS proxy</label>
-          <select id="proxySel"></select>
-        </div>
-        <button id="btnManual" style="width:100%">Dán nội dung thủ công…</button>
+    <button id="advToggle" style="width:100%;margin-top:6px;background:var(--panel2)">⚙️ Nâng cao — Server giọng (chạy nền), proxy… ▾</button>
+    <div id="adv" style="display:none;margin-top:8px">
+      <div class="field"><label>Server giọng</label>
+        <input type="url" id="srvUrl" placeholder="https://…workers.dev" autocomplete="off" inputmode="url">
       </div>
+      <div style="font-size:11.5px;color:var(--muted);margin:-4px 0 10px;line-height:1.5">Dán URL Cloudflare Worker để dùng <b>giọng chạy nền + phát chung Google Maps</b> (xem hướng dẫn kèm file). Sau đó chọn giọng <b>🔊</b> ở ô Giọng đọc phía trên.</div>
+      <div class="field"><label>Nội dung</label>
+        <select id="selContent"><option value="auto">Tự dò (khuyên dùng)</option></select>
+      </div>
+      <div class="field"><label>CORS proxy</label>
+        <select id="proxySel"></select>
+      </div>
+      <button id="btnManual" style="width:100%">Dán nội dung thủ công…</button>
+    </div>
+    <div class="hint">
+      <b>🎙️ Muốn giọng máy hay hơn?</b> Tải thêm <b>giọng tiếng Việt "Nâng cao"/"Cao cấp"</b> rồi chọn ở ô Giọng đọc (có dấu ⭐). Lưu ý: giọng máy KHÔNG chạy khi tắt màn hình — muốn nghe nền hãy dùng giọng 🔊 server ở phần Nâng cao.<br>
+      • <b>iPhone:</b> Cài đặt → Trợ năng → Nội dung nói → Giọng nói → Tiếng Việt → tải bản <b>Nâng cao</b>.<br>
+      • <b>Android:</b> Cài đặt → Văn bản thành giọng nói → cài <b>Google giọng nói</b> → tải Tiếng Việt.
     </div>
   </div>
 </header>
@@ -331,7 +328,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '3.0';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '3.4';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -359,6 +356,16 @@ const store = {
   get(k,d){ try{ const v=localStorage.getItem('dt_'+k); return v===null?d:JSON.parse(v);}catch(e){return d;} },
   set(k,v){ try{ localStorage.setItem('dt_'+k, JSON.stringify(v)); }catch(e){} }
 };
+// IndexedDB cho nội dung PDF (lớn) — tránh làm tràn localStorage khiến mất lịch sử
+const IDB = {
+  _p:null,
+  open(){ if(this._p) return this._p; this._p=new Promise((res,rej)=>{ try{ const r=indexedDB.open('doctruyen',1); r.onupgradeneeded=()=>{ try{ r.result.createObjectStore('kv'); }catch(e){} }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);}catch(e){ rej(e); } }); return this._p; },
+  async set(k,v){ try{ const db=await this.open(); return await new Promise((res)=>{ const tx=db.transaction('kv','readwrite'); tx.objectStore('kv').put(v,k); tx.oncomplete=()=>res(true); tx.onerror=()=>res(false); }); }catch(e){ return false; } },
+  async get(k){ try{ const db=await this.open(); return await new Promise((res)=>{ const tx=db.transaction('kv','readonly'); const rq=tx.objectStore('kv').get(k); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>res(null); }); }catch(e){ return null; } },
+  async del(k){ try{ const db=await this.open(); return await new Promise((res)=>{ const tx=db.transaction('kv','readwrite'); tx.objectStore('kv').delete(k); tx.oncomplete=()=>res(true); tx.onerror=()=>res(false); }); }catch(e){ return false; } }
+};
+// Dọn dữ liệu cũ có thể làm nghẽn localStorage (bản cũ từng nhét nội dung PDF vào đây → tràn → mất cài đặt)
+try{ const _r=store.get('resume',null); if(_r && _r.paras){ delete _r.paras; store.set('resume',_r); } }catch(e){ try{ localStorage.removeItem('dt_resume'); }catch(e2){} }
 
 // ---------- CORS proxies (thử lần lượt) ----------
 // Mỗi proxy: hàm build(url) -> {url, extract(resp)->text}
@@ -684,7 +691,7 @@ function renderChapter(title, paras){
 // một listener duy nhất cho toàn bộ nội dung
 el.content.addEventListener('click',e=>{
   const sp = e.target.closest && e.target.closest('.sent');
-  if(sp && sp.dataset.i!=null) startSpeak(parseInt(sp.dataset.i,10));
+  if(sp && sp.dataset.i!=null){ unlockAudio(); startSpeak(parseInt(sp.dataset.i,10)); }
 });
 
 // ============================================================
@@ -703,6 +710,19 @@ const GOOGLE_VAL = '__google__';
 const audioEl = new Audio();
 audioEl.preload = 'auto';
 audioEl.setAttribute('playsinline','');
+// iOS chỉ cho phát audio nếu play() được gọi NGAY trong cú chạm. Giọng server phát SAU khi fetch (async)
+// nên bị iOS chặn → ta "mở khoá" bằng cách phát 1 đoạn im lặng ngay khi người dùng chạm.
+const SILENT_MP3='data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//OEwAAAAAAAAAAAAEluZm8AAAAPAAAABQAAATgAsbGxsbGxsbGxsbGxsbGxsbGxscTExMTExMTExMTExMTExMTExMTE2NjY2NjY2NjY2NjY2NjY2NjY2Njs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7P//////////////////////////AAAAAExhdmM2MC4zMQAAAAAAAAAAAAAAACQEUAAAAAAAAAE4P2i7tAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//MUxAAAAANIAAAAAExBTUUzLjEwMFVV//MUxAsAAANIAAAAAFVVVVVVVVVVVVVV//MUxBYAAANIAAAAAFVVVVVVVVVVVVVV//MUxCEAAANIAAAAAFVVVVVVVVVVVVVV//MUxCwAAANIAAAAAFVVVVVVVVVVVVVV';
+let audioUnlocked=false;
+function unlockAudio(){
+  if(audioUnlocked) return;
+  try{
+    audioEl.src=SILENT_MP3;
+    const p=audioEl.play();
+    if(p&&p.then) p.then(()=>{audioUnlocked=true;}).catch(()=>{});
+    else audioUnlocked=true;
+  }catch(e){}
+}
 // iOS đôi khi tự tạm dừng audio khi tắt màn hình → tự phát lại nếu ta vẫn đang đọc bằng giọng server
 audioEl.addEventListener('pause', ()=>{
   if(state.reading && currentEngine==='online' && !audioEl.ended){
@@ -989,7 +1009,7 @@ function setStatus(msg, type){ el.status.textContent=msg; el.status.className='s
 
 el.load.addEventListener('click',()=> loadChapter(el.url.value));
 el.url.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); loadChapter(el.url.value); } });
-el.play.addEventListener('click', togglePlay);
+el.play.addEventListener('click', ()=>{ unlockAudio(); togglePlay(); });
 el.stop.addEventListener('click', stopSpeak);
 el.next.addEventListener('click',()=>{ if(state.nextUrl) loadChapter(state.nextUrl,{autoplay:state.reading||state.paused}); else setStatus('Không tìm thấy link chương sau.', 'err'); });
 el.prev.addEventListener('click',()=>{ if(state.prevUrl) loadChapter(state.prevUrl,{autoplay:state.reading||state.paused}); else setStatus('Không tìm thấy link chương trước.', 'err'); });
@@ -1019,17 +1039,19 @@ el.voiceSel.addEventListener('change',()=>{
 });
 // ô URL server giọng
 el.srvUrl.value = serverUrl;
+// Lưu NGAY khi gõ/dán (không đợi rời ô) để không mất khi reload trên điện thoại
+el.srvUrl.addEventListener('input',()=>{ serverUrl = el.srvUrl.value.trim(); store.set('srvUrl', serverUrl); });
 el.srvUrl.addEventListener('change',()=>{
   serverUrl = el.srvUrl.value.trim();
   store.set('srvUrl', serverUrl);
   forceDevice=false; serverWarned=false;
   loadVoices();
-  setStatus(serverUrl? 'Đã lưu server giọng. Chọn giọng 🔊 ở ô Giọng đọc để dùng.' : 'Đã bỏ server giọng.', serverUrl?'ok':'');
+  setStatus(serverUrl? 'Đã lưu server giọng ✓ Chọn giọng 🔊 ở ô Giọng đọc để dùng.' : 'Đã bỏ server giọng.', serverUrl?'ok':'');
 });
 el.voiceTest.addEventListener('click',()=>{
   const sample='Đây là giọng đọc thử. Xin chào, chúc bạn đọc truyện vui vẻ.';
+  unlockAudio();
   try{ if(synth) synth.cancel(); }catch(e){}
-  try{ audioEl.pause(); }catch(e){}
   if(isServerVoice()){
     const a=audioEl; a.onended=null; a.onerror=()=>setStatus('Giọng server không phát được — kiểm tra URL server.', 'err');
     fetchTtsBlob(sample).then(b=>{ a.src=b; a.playbackRate=1; const p=a.play(); if(p&&p.catch)p.catch(()=>setStatus('Không phát được giọng server.', 'err')); })
@@ -1207,16 +1229,18 @@ function saveProgress(force){
   const now = Date.now();
   if(!force && now - lastSaveTs < 2500) return;
   lastSaveTs = now;
-  const cur = { type: state.mode==='pdf'?'pdf':'web', url: state.url||'', title: state.title||'', idx: state.idx||0, total: state.sentences.length, ts: now };
-  if(cur.type==='pdf') cur.paras = state.sentences.map(s=>s.text);
-  try{ store.set('resume', cur); }
-  catch(e){ const c2=Object.assign({},cur); delete c2.paras; try{ store.set('resume',c2); }catch(e2){} }
+  const type = state.mode==='pdf'?'pdf':'web';
+  const cur = { type, url: state.url||'', title: state.title||'', idx: state.idx||0, total: state.sentences.length, ts: now };
+  store.set('resume', cur);   // metadata nhỏ trong localStorage
+  if(type==='pdf'){           // nội dung PDF (lớn) → IndexedDB, không đụng localStorage
+    IDB.set('pdfSession', { key: progressKey(cur), title: cur.title, paras: state.sentences.map(s=>s.text), idx: cur.idx, ts: now });
+  }
   let hist = store.get('history', []);
   const key = progressKey(cur);
   hist = hist.filter(h=>progressKey(h)!==key);
-  hist.unshift({ type:cur.type, url:cur.url, title:cur.title, idx:cur.idx, total:cur.total, ts:cur.ts });
+  hist.unshift({ type, url:cur.url, title:cur.title, idx:cur.idx, total:cur.total, ts:now });
   hist = hist.slice(0,30);
-  try{ store.set('history', hist); }catch(e){}
+  store.set('history', hist);
 }
 function jumpToIdx(idx){
   const s=state.sentences[idx]; if(!s) return;
@@ -1226,17 +1250,24 @@ function jumpToIdx(idx){
   try{ s.node.scrollIntoView({block:'center',behavior:'auto'}); }catch(e){}
   updateProgress();
 }
+function restorePdf(title, paras, idx){
+  stopSpeak();
+  state.nextUrl=null; state.prevUrl=null; state.url='';
+  el.pdfName.textContent=(title||'PDF').replace(/^📄\s*/,''); setMode('pdf');
+  renderChapter(title||'📄 PDF', paras);
+  jumpToIdx(Math.min(idx||0, state.sentences.length-1));
+  setStatus('Đã mở lại PDF ngay chỗ đang đọc.', 'ok');
+}
 async function resumeFrom(it){
   if(!it) return false;
   if(it.type==='pdf'){
-    if(!it.paras || !it.paras.length){ setStatus('Mục PDF này cần bấm 📄 mở lại file để tiếp tục.', ''); return false; }
-    stopSpeak();
-    state.nextUrl=null; state.prevUrl=null; state.url='';
-    el.pdfName.textContent=(it.title||'PDF').replace(/^📄\s*/,''); setMode('pdf');
-    renderChapter(it.title||'📄 PDF', it.paras);
-    jumpToIdx(Math.min(it.idx||0, state.sentences.length-1));
-    setStatus('Đã mở lại PDF ngay chỗ đang đọc.', 'ok');
-    return true;
+    const sess = await IDB.get('pdfSession');
+    if(sess && sess.key===progressKey(it) && sess.paras && sess.paras.length){
+      restorePdf(it.title, sess.paras, it.idx!=null?it.idx:sess.idx);
+      return true;
+    }
+    setStatus('PDF này cần bấm 📄 mở lại file để đọc tiếp (chỉ giữ được nội dung PDF gần nhất).', '');
+    return false;
   } else if(it.url){
     const ok = await loadChapter(it.url);
     if(ok) jumpToIdx(Math.min(it.idx||0, state.sentences.length-1));
@@ -1244,15 +1275,28 @@ async function resumeFrom(it){
   }
   return false;
 }
+// Khi mở app: PDF thì TỰ khôi phục (kể cả sau reload); web thì hiện nút "Tiếp tục"
+async function initResume(){
+  const r = store.get('resume', null);
+  if(!r) return;
+  if(r.type==='pdf'){
+    const sess = await IDB.get('pdfSession');
+    if(sess && sess.paras && sess.paras.length){
+      restorePdf(r.title, sess.paras, r.idx!=null?r.idx:sess.idx);
+      return;
+    }
+  }
+  maybeShowResume();
+}
 function maybeShowResume(){
   const r = store.get('resume', null);
-  if(r && (r.url || (r.type==='pdf' && r.paras))){
+  if(r && (r.url || r.type==='pdf')){
     el.resumeLabel.textContent = (r.title||'chương trước').replace(/^📄\s*/,'') + (r.total? ' · câu '+((r.idx||0)+1)+'/'+r.total : '');
     el.resumeBanner.style.display='flex';
     el.resumeBanner.__item = r;
   }
 }
-el.resumeGo.addEventListener('click',()=>{ const it=el.resumeBanner.__item; el.resumeBanner.style.display='none'; resumeFrom(it); });
+el.resumeGo.addEventListener('click',()=>{ unlockAudio(); const it=el.resumeBanner.__item; el.resumeBanner.style.display='none'; resumeFrom(it); });
 el.resumeClose.addEventListener('click',()=>{ el.resumeBanner.style.display='none'; });
 
 function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
@@ -1261,32 +1305,25 @@ function renderHist(){
   const hist = store.get('history', []);
   el.histList.innerHTML='';
   if(!hist.length){ const d=document.createElement('div'); d.className='toc-empty'; d.textContent='Chưa có lịch sử.'; el.histList.appendChild(d); return; }
-  const r=store.get('resume',null);
+  const rk = (()=>{ const r=store.get('resume',null); return r?progressKey(r):null; })();
   const frag=document.createDocumentFragment();
   hist.forEach(h=>{
     const b=document.createElement('button'); b.type='button'; b.className='toc-item';
     const icon=h.type==='pdf'?'📄 ':'📖 ';
     const pct = h.total? ('đọc '+Math.round(((h.idx||0)+1)/h.total*100)+'% · ') : '';
-    const pdfNote = (h.type==='pdf' && !(r&&r.type==='pdf'&&r.paras&&progressKey(r)===progressKey(h))) ? ' · cần mở lại file' : '';
+    const pdfNote = (h.type==='pdf' && progressKey(h)!==rk) ? ' · cần mở lại file' : '';
     b.innerHTML = icon + escapeHtml(h.title||h.url||'(không tên)') + '<small>'+ pct + timeAgo(h.ts) + pdfNote +'</small>';
-    b.addEventListener('click',()=>{ closeHist(); openHistItem(h); });
+    b.addEventListener('click',()=>{ closeHist(); resumeFrom(h); });
     frag.appendChild(b);
   });
   el.histList.appendChild(frag);
-}
-async function openHistItem(h){
-  if(h.type==='pdf'){
-    const r=store.get('resume',null);
-    if(r && r.type==='pdf' && r.paras && progressKey(r)===progressKey(h)) resumeFrom(r);
-    else setStatus('PDF "'+(h.title||'')+'": hãy bấm 📄 mở lại file để đọc tiếp (trình duyệt không giữ được file cục bộ).', '');
-  } else resumeFrom(h);
 }
 function openHist(){ renderHist(); el.histPanel.classList.add('open'); el.histBackdrop.classList.add('open'); }
 function closeHist(){ el.histPanel.classList.remove('open'); el.histBackdrop.classList.remove('open'); }
 el.btnHist.addEventListener('click', openHist);
 el.histClose.addEventListener('click', closeHist);
 el.histBackdrop.addEventListener('click', closeHist);
-el.histClear.addEventListener('click',()=>{ store.set('history',[]); store.set('resume',null); renderHist(); el.resumeBanner.style.display='none'; });
+el.histClear.addEventListener('click',()=>{ store.set('history',[]); store.set('resume',null); IDB.del('pdfSession'); renderHist(); el.resumeBanner.style.display='none'; });
 window.addEventListener('pagehide',()=>saveProgress(true));
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') saveProgress(true); });
 
@@ -1407,7 +1444,7 @@ el.btnManual.addEventListener('click',()=>{
   el.autonextSeg.querySelectorAll('button').forEach(b=>b.classList.toggle('sel', b.dataset.auto===an));
   syncSpeedSeg();
   setMode('web');
-  maybeShowResume();
+  initResume();
   if(el.verTag) el.verTag.textContent='v'+APP_VERSION;
   document.title='Đọc Truyện Audio v'+APP_VERSION;
   // phòng xa: mọi <button> đều là type=button để không bao giờ submit/tải lại trang
