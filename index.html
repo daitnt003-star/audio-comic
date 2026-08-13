@@ -328,7 +328,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '3.7';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '3.8';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -1248,8 +1248,10 @@ function saveProgress(force){
   lastSaveTs = now;
   const type = state.mode==='pdf'?'pdf':'web';
   const cur = { type, url: state.url||'', title: state.title||'', idx: state.idx||0, total: state.sentences.length, ts: now };
-  store.set('resume', cur);   // metadata nhỏ trong localStorage
-  if(type==='pdf'){           // nội dung PDF (lớn) → IndexedDB, không đụng localStorage
+  store.set('resume', cur);   // metadata nhỏ (gồm idx) trong localStorage — nhẹ, lưu mỗi câu OK
+  if(type==='pdf' && force){  // nội dung PDF/TXT (lớn) chỉ ghi 1 lần lúc MỞ file (force=true).
+    // Không ghi lại mỗi câu: ghi cả cuốn truyện vào IndexedDB liên tục làm nghẽn luồng chính
+    // → giọng máy và chữ chạy bị delay. Vị trí đang đọc (idx) đã nằm trong 'resume' ở trên.
     IDB.set('pdfSession', { key: progressKey(cur), title: cur.title, paras: state.sentences.map(s=>s.text), idx: cur.idx, ts: now });
   }
   let hist = store.get('history', []);
