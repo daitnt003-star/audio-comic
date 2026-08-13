@@ -172,12 +172,12 @@
         <small>Nghe · tự sang chương · <span id="verTag"></span></small>
       </div>
     </div>
-    <button class="icon" id="btnPdf" title="Mở file PDF">📄</button>
+    <button class="icon" id="btnPdf" title="Mở file PDF / TXT">📄</button>
     <button class="icon" id="btnToc" title="Mục lục">📑</button>
     <button class="icon" id="btnHist" title="Lịch sử đọc">🕘</button>
     <button class="icon" id="btnSearch" title="Tìm trong chương">🔍</button>
     <button class="icon" id="btnSettings" title="Cài đặt">⚙️</button>
-    <input type="file" id="pdfInput" accept="application/pdf,.pdf" style="display:none">
+    <input type="file" id="pdfInput" accept="application/pdf,.pdf,text/plain,.txt" style="display:none">
   </div>
   <form class="row" id="searchBar" style="margin-top:10px;display:none" onsubmit="return false" action="javascript:void(0)">
     <input type="text" id="findInput" placeholder="Tìm chữ trong chương…" autocomplete="off" enterkeyhint="search" inputmode="search">
@@ -328,7 +328,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '3.4';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '3.7';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -806,38 +806,52 @@ function speakSentence(i){
   state.idx=i;
   highlight(i);
   const s = state.sentences[i];
-  if(isServerVoice()) speakServer(i, s.text);
+  if(isServerVoice()) speakServer(i);
   else if(isOnlineVoice()) speakOnline(i, s.text);
   else speakDevice(i, s.text);
   updateProgress();
 }
 
-// ---- Giọng server (audio thật MP3 → chạy nền + phát chung Google Maps) ----
-async function speakServer(i, text){
-  currentEngine='online';
-  try{
-    let blobUrl;
-    if(srvPrefetch && srvPrefetch.i===i && srvPrefetch.promise){ blobUrl=await srvPrefetch.promise; }
-    if(!blobUrl){ blobUrl=await fetchTtsBlob(text); }
-    if(!state.reading){ try{URL.revokeObjectURL(blobUrl);}catch(e){} return; }
-    audioEl.onended=null; audioEl.onerror=null;
-    audioEl.__i=i;
-    audioEl.src=blobUrl;
-    audioEl.playbackRate=Math.min(Math.max(parseFloat(el.rate.value)||1,0.5),3);   // tốc độ qua audio (Google không chỉnh sẵn)
-    audioEl.onended=()=>{ try{URL.revokeObjectURL(blobUrl);}catch(e){} if(state.reading && audioEl.__i===i) speakSentence(i+1); };
-    audioEl.onerror=()=>{ try{URL.revokeObjectURL(blobUrl);}catch(e){} serverFallback(i,text); };
-    const p=audioEl.play(); if(p&&p.catch) p.catch(()=>serverFallback(i,text));
-    setMediaMeta();
-    const nx=state.sentences[i+1];
-    srvPrefetch = nx ? {i:i+1, promise:fetchTtsBlob(nx.text).catch(()=>null)} : null;
-  }catch(e){ serverFallback(i,text); }
+// ---- Giọng server: phát THEO ĐOẠN DÀI (~480 ký tự ≈ 30s) → ít khoảng ngắt, chạy nền iOS ổn định ----
+function chunkFrom(startIdx){
+  let text='', endIdx=startIdx;
+  for(let j=startIdx; j<state.sentences.length; j++){
+    const t=state.sentences[j].text;
+    if(text && (text.length + t.length + 1) > 480) break;
+    text += (text?' ':'') + t; endIdx=j;
+  }
+  return { text, endIdx };
 }
-function serverFallback(i, text){
+async function speakServer(startIdx){
+  currentEngine='online';
+  const { text, endIdx } = chunkFrom(startIdx);
+  let blobUrl;
+  try{
+    if(srvPrefetch && srvPrefetch.i===startIdx && srvPrefetch.promise){ blobUrl=await srvPrefetch.promise; }
+    if(!blobUrl){ blobUrl=await fetchTtsBlob(text); }
+  }catch(e){ serverFallback(startIdx, 'TẢI: '+((e&&e.message)||e)); return; }
+  if(!blobUrl){ serverFallback(startIdx, 'TẢI: rỗng'); return; }
+  if(!state.reading){ try{URL.revokeObjectURL(blobUrl);}catch(e){} return; }
+  audioEl.onended=null; audioEl.onerror=null;
+  audioEl.__i=startIdx;
+  audioEl.src=blobUrl;
+  audioEl.playbackRate=Math.min(Math.max(parseFloat(el.rate.value)||1,0.5),3);
+  audioEl.onended=()=>{ try{URL.revokeObjectURL(blobUrl);}catch(e){} if(state.reading && audioEl.__i===startIdx) speakSentence(endIdx+1); };
+  audioEl.onerror=()=>{ try{URL.revokeObjectURL(blobUrl);}catch(e){} serverFallback(startIdx, 'GIẢI MÃ: audio code '+(audioEl.error&&audioEl.error.code)); };
+  try{
+    const p=audioEl.play();
+    if(p && p.catch) p.catch(err=>serverFallback(startIdx, 'PHÁT bị chặn: '+((err&&err.name)||err)));
+  }catch(e){ serverFallback(startIdx, 'PHÁT: '+((e&&e.message)||e)); return; }
+  setMediaMeta();
+  if(endIdx+1 < state.sentences.length){ const nx=chunkFrom(endIdx+1); srvPrefetch={ i:endIdx+1, promise:fetchTtsBlob(nx.text).catch(()=>null) }; }
+  else srvPrefetch=null;
+}
+function serverFallback(startIdx, reason){
   if(!state.reading) return;
-  if(!serverWarned){ serverWarned=true; setStatus('Giọng server không tải được — tạm dùng giọng máy. Kiểm tra URL server trong ⚙️ Nâng cao.', 'err'); }
+  setStatus('Giọng server lỗi ['+(reason||'?')+'] — tạm dùng giọng máy.', 'err');
   forceDevice=true;
-  if(synth) speakDevice(i, text);
-  else setTimeout(()=>{ if(state.reading) speakSentence(i+1); }, 300);
+  if(synth) speakDevice(startIdx, state.sentences[startIdx].text);
+  else setTimeout(()=>{ if(state.reading) speakSentence(startIdx+1); }, 300);
 }
 function setMediaMeta(){
   if(!('mediaSession' in navigator)) return;
@@ -900,6 +914,9 @@ function startSpeak(fromIdx){
   if(typeof fromIdx!=='number') fromIdx = state.idx||0;
   keepAwake(true);
   startResumeGuard();
+  if(!isServerVoice()){
+    setStatus('⚠️ Đang dùng GIỌNG MÁY — iOS sẽ TẮT khi khoá màn hình. Muốn nghe khi tắt màn hình: ⚙️ → Nâng cao → dán server → chọn giọng 🔊.', 'err');
+  }
   speakSentence(fromIdx);
 }
 
@@ -1345,9 +1362,30 @@ function loadPdfJs(){
   });
   return pdfjsReady;
 }
+async function openTxt(file){
+  stopSpeak();
+  setStatus('Đang mở: '+file.name+' …');
+  try{
+    let text = await file.text();
+    text = text.replace(/\r\n?/g,'\n');
+    let paras = text.split(/\n{2,}/).map(s=>s.replace(/\s*\n\s*/g,' ').replace(/[ \t]{2,}/g,' ').trim()).filter(Boolean);
+    if(!paras.length){ paras = text.split(/\n/).map(s=>s.trim()).filter(Boolean); }
+    if(!paras.length || paras.join('').replace(/\s/g,'').length<5){ setStatus('File rỗng hoặc không có chữ.', 'err'); return; }
+    const name=file.name.replace(/\.txt$/i,'');
+    state.nextUrl=null; state.prevUrl=null; state.url='';
+    el.next.style.opacity=.4; el.prev.style.opacity=.4; el.chapNum.value='';
+    el.pdfName.textContent=file.name;
+    setMode('pdf');
+    renderChapter('📄 '+name, paras);
+    saveProgress(true);
+    setStatus('Đã mở: '+name+' · '+paras.length+' đoạn. Bấm ▶ để nghe.', 'ok');
+    window.scrollTo({top:0,behavior:'auto'});
+  }catch(e){ setStatus('Lỗi đọc file: '+((e&&e.message)||e), 'err'); }
+}
 async function openPdf(file){
   if(!file) return;
-  if(!/\.pdf$/i.test(file.name) && file.type!=='application/pdf'){ setStatus('Vui lòng chọn file PDF.', 'err'); return; }
+  if(/\.txt$/i.test(file.name) || file.type==='text/plain'){ return openTxt(file); }
+  if(!/\.pdf$/i.test(file.name) && file.type!=='application/pdf'){ setStatus('Vui lòng chọn file PDF hoặc TXT.', 'err'); return; }
   stopSpeak();
   setStatus('Đang mở PDF: '+file.name+' …');
   let pdfjs;
