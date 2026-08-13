@@ -328,7 +328,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '3.8';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '3.9';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -832,12 +832,23 @@ async function speakServer(startIdx){
   }catch(e){ serverFallback(startIdx, 'TẢI: '+((e&&e.message)||e)); return; }
   if(!blobUrl){ serverFallback(startIdx, 'TẢI: rỗng'); return; }
   if(!state.reading){ try{URL.revokeObjectURL(blobUrl);}catch(e){} return; }
-  audioEl.onended=null; audioEl.onerror=null;
+  audioEl.onended=null; audioEl.onerror=null; audioEl.ontimeupdate=null;
   audioEl.__i=startIdx;
   audioEl.src=blobUrl;
   audioEl.playbackRate=Math.min(Math.max(parseFloat(el.rate.value)||1,0.5),3);
-  audioEl.onended=()=>{ try{URL.revokeObjectURL(blobUrl);}catch(e){} if(state.reading && audioEl.__i===startIdx) speakSentence(endIdx+1); };
-  audioEl.onerror=()=>{ try{URL.revokeObjectURL(blobUrl);}catch(e){} serverFallback(startIdx, 'GIẢI MÃ: audio code '+(audioEl.error&&audioEl.error.code)); };
+  audioEl.onended=()=>{ audioEl.ontimeupdate=null; try{URL.revokeObjectURL(blobUrl);}catch(e){} if(state.reading && audioEl.__i===startIdx) speakSentence(endIdx+1); };
+  audioEl.onerror=()=>{ audioEl.ontimeupdate=null; try{URL.revokeObjectURL(blobUrl);}catch(e){} serverFallback(startIdx, 'GIẢI MÃ: audio code '+(audioEl.error&&audioEl.error.code)); };
+  // ---- Highlight bám theo audio: 1 MP3 đọc nhiều câu → di chuyển highlight theo tiến độ phát ----
+  const offs=[]; let acc=0;
+  for(let j=startIdx; j<=endIdx; j++){ offs.push(acc); acc += state.sentences[j].text.length + 1; }
+  const totalChars = acc || 1;
+  audioEl.ontimeupdate=()=>{
+    if(audioEl.__i!==startIdx || !audioEl.duration || !isFinite(audioEl.duration)) return;
+    const target = (audioEl.currentTime/audioEl.duration) * totalChars;
+    let k=startIdx;
+    for(let j=startIdx; j<=endIdx; j++){ if(offs[j-startIdx] <= target) k=j; else break; }
+    if(k!==state.idx){ state.idx=k; highlight(k); }
+  };
   try{
     const p=audioEl.play();
     if(p && p.catch) p.catch(err=>serverFallback(startIdx, 'PHÁT bị chặn: '+((err&&err.name)||err)));
@@ -863,6 +874,7 @@ function setMediaMeta(){
 
 function speakDevice(i, text){
   currentEngine='device';
+  try{ audioEl.ontimeupdate=null; }catch(e){}
   const u = new SpeechSynthesisUtterance(text);
   const v = getVoice();
   if(v){ u.voice=v; u.lang=v.lang; } else u.lang='vi-VN';
@@ -881,7 +893,7 @@ function speakDevice(i, text){
 function speakOnline(i, text){
   currentEngine='online';
   try{
-    audioEl.onended=null; audioEl.onerror=null;
+    audioEl.onended=null; audioEl.onerror=null; audioEl.ontimeupdate=null;
     audioEl.__i=i;
     audioEl.src=googleTTS(text);
     audioEl.playbackRate=Math.min(Math.max(parseFloat(el.rate.value)||1,0.5),4);
@@ -935,7 +947,7 @@ function stopSpeak(){
   state.reading=false; state.paused=false;
   if(curUtter) curUtter.__stopped=true;
   try{ if(synth) synth.cancel(); }catch(e){}
-  try{ audioEl.onended=null; audioEl.pause(); audioEl.currentTime=0; }catch(e){}
+  try{ audioEl.onended=null; audioEl.ontimeupdate=null; audioEl.pause(); audioEl.currentTime=0; }catch(e){}
   el.play.textContent='▶';
   stopResumeGuard();
   keepAwake(false);
