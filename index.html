@@ -172,12 +172,12 @@
         <small>Nghe · tự sang chương · <span id="verTag"></span></small>
       </div>
     </div>
-    <button class="icon" id="btnPdf" title="Mở file PDF / TXT">📄</button>
+    <button class="icon" id="btnPdf" title="Mở file PDF / DOCX / TXT">📄</button>
     <button class="icon" id="btnToc" title="Mục lục">📑</button>
     <button class="icon" id="btnHist" title="Lịch sử đọc">🕘</button>
     <button class="icon" id="btnSearch" title="Tìm trong chương">🔍</button>
     <button class="icon" id="btnSettings" title="Cài đặt">⚙️</button>
-    <input type="file" id="pdfInput" accept="application/pdf,.pdf,text/plain,.txt" style="display:none">
+    <input type="file" id="pdfInput" accept="application/pdf,.pdf,text/plain,.txt,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style="display:none">
   </div>
   <form class="row" id="searchBar" style="margin-top:10px;display:none" onsubmit="return false" action="javascript:void(0)">
     <input type="text" id="findInput" placeholder="Tìm chữ trong chương…" autocomplete="off" enterkeyhint="search" inputmode="search">
@@ -328,7 +328,7 @@
    - Đọc bằng Web Speech API, tự next chương
    ============================================================ */
 
-const APP_VERSION = '3.9';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
+const APP_VERSION = '3.10';   // tăng mỗi lần cập nhật để biết đang chạy bản nào
 const $ = id => document.getElementById(id);
 const el = {
   url:$('urlInput'), load:$('btnLoad'), status:$('status'),
@@ -1376,30 +1376,65 @@ function loadPdfJs(){
   });
   return pdfjsReady;
 }
+let mammothReady=null;
+function loadMammoth(){
+  if(window.mammoth) return Promise.resolve(window.mammoth);
+  if(mammothReady) return mammothReady;
+  mammothReady=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.12.1/mammoth.browser.min.js';
+    s.onload=()=>{ window.mammoth ? res(window.mammoth) : rej(new Error('Không tải được thư viện đọc DOCX.')); };
+    s.onerror=()=>rej(new Error('Không tải được thư viện đọc DOCX (cần mạng).'));
+    document.head.appendChild(s);
+  });
+  return mammothReady;
+}
+// tách text đã trích (TXT/DOCX) thành các đoạn để đọc
+function textToParas(text){
+  text = String(text||'').replace(/\r\n?/g,'\n');
+  let paras = text.split(/\n{2,}/).map(s=>s.replace(/\s*\n\s*/g,' ').replace(/[ \t]{2,}/g,' ').trim()).filter(Boolean);
+  if(!paras.length){ paras = text.split(/\n/).map(s=>s.trim()).filter(Boolean); }
+  return paras;
+}
+function showFileContent(name, paras){
+  state.nextUrl=null; state.prevUrl=null; state.url='';
+  el.next.style.opacity=.4; el.prev.style.opacity=.4; el.chapNum.value='';
+  el.pdfName.textContent=name;
+  setMode('pdf');
+  renderChapter('📄 '+name.replace(/\.(txt|docx?)$/i,''), paras);
+  saveProgress(true);
+  setStatus('Đã mở: '+name+' · '+paras.length+' đoạn. Bấm ▶ để nghe.', 'ok');
+  window.scrollTo({top:0,behavior:'auto'});
+}
 async function openTxt(file){
   stopSpeak();
   setStatus('Đang mở: '+file.name+' …');
   try{
-    let text = await file.text();
-    text = text.replace(/\r\n?/g,'\n');
-    let paras = text.split(/\n{2,}/).map(s=>s.replace(/\s*\n\s*/g,' ').replace(/[ \t]{2,}/g,' ').trim()).filter(Boolean);
-    if(!paras.length){ paras = text.split(/\n/).map(s=>s.trim()).filter(Boolean); }
+    const paras = textToParas(await file.text());
     if(!paras.length || paras.join('').replace(/\s/g,'').length<5){ setStatus('File rỗng hoặc không có chữ.', 'err'); return; }
-    const name=file.name.replace(/\.txt$/i,'');
-    state.nextUrl=null; state.prevUrl=null; state.url='';
-    el.next.style.opacity=.4; el.prev.style.opacity=.4; el.chapNum.value='';
-    el.pdfName.textContent=file.name;
-    setMode('pdf');
-    renderChapter('📄 '+name, paras);
-    saveProgress(true);
-    setStatus('Đã mở: '+name+' · '+paras.length+' đoạn. Bấm ▶ để nghe.', 'ok');
-    window.scrollTo({top:0,behavior:'auto'});
+    showFileContent(file.name, paras);
   }catch(e){ setStatus('Lỗi đọc file: '+((e&&e.message)||e), 'err'); }
+}
+async function openDocx(file){
+  stopSpeak();
+  if(/\.doc$/i.test(file.name)){ setStatus('File .doc (bản cũ) không đọc được — hãy lưu lại thành .docx rồi thử lại.', 'err'); return; }
+  setStatus('Đang mở DOCX: '+file.name+' …');
+  let mammoth;
+  try{ mammoth=await loadMammoth(); }
+  catch(e){ setStatus(e.message||'Không tải được thư viện đọc DOCX.', 'err'); return; }
+  try{
+    const buf = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer: buf });
+    const paras = textToParas(result && result.value);
+    if(!paras.length || paras.join('').replace(/\s/g,'').length<5){ setStatus('File rỗng hoặc không đọc được chữ (có thể là DOCX ảnh/quét).', 'err'); return; }
+    showFileContent(file.name, paras);
+  }catch(e){ setStatus('Lỗi đọc DOCX: '+((e&&e.message)||e), 'err'); }
 }
 async function openPdf(file){
   if(!file) return;
   if(/\.txt$/i.test(file.name) || file.type==='text/plain'){ return openTxt(file); }
-  if(!/\.pdf$/i.test(file.name) && file.type!=='application/pdf'){ setStatus('Vui lòng chọn file PDF hoặc TXT.', 'err'); return; }
+  if(/\.docx?$/i.test(file.name) || /officedocument\.wordprocessingml|msword/i.test(file.type||'')){ return openDocx(file); }
+  if(!/\.pdf$/i.test(file.name) && file.type!=='application/pdf'){ setStatus('Vui lòng chọn file PDF, DOCX hoặc TXT.', 'err'); return; }
   stopSpeak();
   setStatus('Đang mở PDF: '+file.name+' …');
   let pdfjs;
